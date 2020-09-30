@@ -12,8 +12,11 @@ The code is still under construction - This maybe can explain why it looks like 
 
 ## Library requirements:
 
-Tensorflow 2.*
-Keras
-Zarr
-Msprime
-Stdpopsim
+The code was tested using the following packages and versions:
+
+Tensorflow==2.3.*
+Tensorflow probability==0.11.0
+Tensorflow addons==0.8.3
+Zarr==2.4.0
+Msprime==0.7.4
+Stdpopsim==0.1.2
