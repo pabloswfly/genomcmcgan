@@ -8,7 +8,7 @@ The code is still under construction - This maybe can explain why it looks like 
 
 - **genomcmcgan_uniparam_simple.py:** Python script to run MCMC-GAN inference on simulated data to predict a single parameter. The MCMC kernel selected is Random Walk Metropolis.
 
-- **genomcmcgan_uniparam_simple.py:** Python script to run MCMC-GAN inference on simulated data to predict a single parameter. The MCMC kernel selected is Random Walk Metropolis, and the Gaussian approximation is applied.
+- **genomcmcgan_uniparam_gauss.py:** Python script to run MCMC-GAN inference on simulated data to predict a single parameter. The MCMC kernel selected is Random Walk Metropolis, and the Gaussian approximation is applied.
 
 ## Library requirements:
 
