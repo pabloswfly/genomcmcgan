@@ -10,6 +10,8 @@
 # !pip install tskit==0.2.3 zarr msprime stdpopsim tensorflow
 
 # Importing libraries and modules
+import signal
+from contextlib import contextmanager
 import msprime
 import stdpopsim
 import zarr
@@ -39,6 +41,23 @@ if gpus:
       tf.config.experimental.set_memory_growth(gpu, True)
   except RuntimeError as e:
     print(e)
+
+def raise_timeout(signum, frame):
+    raise TimeoutError
+
+@contextmanager
+def timeout(time):
+    # Register a function to raise a TimeoutError on the signal.
+    signal.signal(signal.SIGALRM, raise_timeout)
+    # Schedule the signal to be sent after ``time``.
+    signal.alarm(time)
+
+    try:
+        yield
+    finally:
+        # Unregister the signal so it won't be triggered
+        # if the timeout is not reached.
+        signal.signal(signal.SIGALRM, signal.SIG_IGN)
 
 class Parameter():
 
@@ -230,23 +249,29 @@ class Genobuilder():
       if self.log:
         params = [np.float_power(10, p) for p in params]
 
-      sims = msprime.simulate(
-          sample_size=self.num_samples, Ne=params[2], length=self.seq_len,
-          mutation_rate=params[1], recombination_rate=params[0],
-          num_replicates=self.num_reps, random_seed=seed
-          )
+      timed_out = False
+
+      try:
+        with timeout(0.5 * self.num_reps):
+          sims = msprime.simulate(
+            sample_size=self.num_samples, Ne=params[2], length=self.seq_len,
+            mutation_rate=params[1], recombination_rate=params[0],
+            num_replicates=self.num_reps, random_seed=seed
+            )
+      except TimeoutError:
+        timed_out = True
 
       mat = np.zeros((self.num_reps, self.num_samples, self.fixed_dim))
 
+      if not timed_out:
+        # For each tree sequence output from the simulation
+        for i, ts in enumerate(sims):
+          mat[i] = self._resize_from_ts(ts)
 
-      # For each tree sequence output from the simulation
-      for i, ts in enumerate(sims):
-        mat[i] = self._resize_from_ts(ts)
-
-      # Scale genotype matrices from [0, 1] to [-1, 1]. If we were to use
-      # a generator, this scale should be done with tanh function
-      if self.scale:
-        mat = scale_matrix(mat)
+        # Scale genotype matrices from [0, 1] to [-1, 1]. If we were to use
+        # a generator, this scale should be done with tanh function
+        if self.scale:
+          mat = scale_matrix(mat)
 
       # Expand dimension by 1 (add channel dim). -1 stands for last axis.
       mat = np.expand_dims(mat, axis=-1)
