@@ -31,7 +31,7 @@ import tensorflow_addons as tfa
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
 
-
+print('test')
 gpus = tf.config.experimental.list_physical_devices('GPU')
 if gpus:
   try:
