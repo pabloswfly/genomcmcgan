@@ -29,7 +29,7 @@ The different arguments and flags are:
 
 - **-n/--num-rep:** Number of genotype matrices to generate.
 
-- **-o/--output:** Name of the output file with the downloaded genobuilder pickle object. In case of "download_genmats" function, the genotype matrices are stored in the "*_data.pkl* file.
+- **-o/--output:** Name of the output file with the downloaded genobuilder pickle object. In case of "download_genmats" function, the genotype matrices are stored in the "*\*_data.pkl* file.
 
 
 ## Library requirements:
