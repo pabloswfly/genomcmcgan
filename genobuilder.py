@@ -154,7 +154,9 @@ class Genobuilder:
             )
         self._sim_source = s
 
+        
     def simulate_msprime(self, params, random=False, gauss=False):
+
         """Simulate demographic data, returning a tensor with n_reps number
         of genotype matrices"""
 
@@ -163,7 +165,7 @@ class Genobuilder:
         try:
             with timeout(int(0.5 * self.num_reps)):
 
-                if random:
+                if randomize:
                     sims = msprime.simulate(
                         sample_size=self.num_samples,
                         Ne=params["effective size"].rand(gauss),
@@ -192,9 +194,10 @@ class Genobuilder:
         mat = np.zeros((self.num_reps, self.num_samples, self.fixed_dim))
 
         if not timed_out:
+            rng = random.Random(seed)
             # For each tree sequence output from the simulation
             for i, ts in enumerate(sims):
-                mat[i] = self._resize_from_ts(ts)
+                mat[i] = self._resize_from_ts(ts, rng)
 
             # Scale genotype matrices from [0, 1] to [-1, 1]. If we were to use
             # a generator, this scale should be done with tanh function
@@ -289,6 +292,7 @@ class Genobuilder:
 
         mat = np.zeros((self.num_reps, self.num_samples, self.fixed_dim))
 
+        rng = random.Random(seed)
         # For each tree sequence output from the simulation
         for i, ts in enumerate(sims):
 
@@ -300,7 +304,7 @@ class Genobuilder:
 
             # No error prob, it doesn't mutate the matrix
             else:
-                mat[i] = self._resize_from_ts(ts)
+                mat[i] = self._resize_from_ts(ts, rng)
 
         # Scale genotype matrices from [0, 1] to [-1, 1]. If we were to use
         # a generator, this scale should be done with tanh function
@@ -336,7 +340,7 @@ class Genobuilder:
         print(f"generating {num_reps} genotype matrices from msprime")
         print(paramlist)
 
-        gen0 = self.simulate_msprime(self.params, random=True, gauss=gauss)
+        gen0 = self.simulate_msprime(self.params, randomize=True, gauss=gauss)
 
         X = np.concatenate((gen1, gen0))
         y = np.concatenate((np.ones((num_reps)), np.zeros((num_reps))))
@@ -350,7 +354,7 @@ class Genobuilder:
         self.num_reps = num_reps
 
         print(f"generating {num_reps} genotype matrices from msprime for testing")
-        return self.simulate_msprime(self.params, seed=None, random=True)
+        return self.simulate_msprime(self.params, seed=None, randomize=True)
 
     def _mutate_geno_old(self, ts, p=0.001):
         """Returns a genotype matrix with a fixed number of columns,
@@ -474,34 +478,32 @@ class Genobuilder:
 
         return chroms, pos, slices
 
-    def _resize_from_ts(self, ts, flip=True):
+    def _resize_from_ts(self, ts, rng, flip=True):
         """Returns a genotype matrix with a fixed number of columns,
         as specified in size"""
 
-        m = np.zeros((ts.num_samples, self.fixed_dim), dtype=float)
-        flip = {0: 1, 1: 0, -1: -1}
+        m = np.zeros((ts.num_samples, self.fixed_dim), dtype=int)
+        ac_thresh = self.maf_thresh * ts.num_samples
 
         for variant in ts.variants():
 
-            # Calculate allele frequency
-            af = np.mean(variant.genotypes)
-
             # Filter by MAF
-            if self.maf_thresh is not None:
-                if af < self.maf_thresh or af > 1 - self.maf_thresh:
-                    continue
+            genotypes = variant.genotypes
+            ac1 = np.sum(genotypes)
+            ac0 = len(genotypes) - ac1
+            if min(ac0, ac1) < ac_thresh:
+                continue
 
-            # Polarise the matrix by major allele frequency.
+            # Polarise 0 and 1 in genotype matrix by major allele frequency.
+            # If allele counts are the same, randomly choose a major allele.
             if flip:
-                if af > 0.5 or (af == 0.5 and random.Random() > 0.5):
-                    variant.genotypes = [flip[b] for b in variant.genotypes]
+                if ac1 > ac0 or (ac1 == ac0 and rng.random() > 0.5):
+                    genotypes ^= 1
 
             j = int(variant.site.position * self.fixed_dim / ts.sequence_length)
-            np.add(
-                m[:, j], variant.genotypes, out=m[:, j], where=variant.genotypes != -1
-            )
+            m[:, j] += genotypes
 
-        return m
+        return m.astype(float)
 
     def _resize_from_zarr(self, mat, pos, alts, flip=True):
         """Resizes a matrix using a sum window, given a genotype matrix,
