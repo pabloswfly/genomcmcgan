@@ -45,6 +45,7 @@ class Genobuilder:
         seq_len,
         maf_thresh,
         fixed_dim=128,
+        seed=None,
         scale=False,
         **kwargs,
     ):
@@ -53,6 +54,7 @@ class Genobuilder:
         self._maf_thresh = maf_thresh
         self._source = source
         self._fixed_dim = fixed_dim
+        self._seed = seed
         self._scale = scale
         self._num_reps = None
         super(Genobuilder, self).__init__(**kwargs)
@@ -81,6 +83,10 @@ class Genobuilder:
     @property
     def fixed_dim(self):
         return self._fixed_dim
+
+    @property
+    def seed(self):
+        return self._seed
 
     @property
     def num_reps(self):
@@ -128,6 +134,10 @@ class Genobuilder:
             raise ValueError("We recommend the fixed dimension to be multiple of 2")
         self._fixed_dim = f
 
+    @seed.setter
+    def seed(self, s):
+        self._seed = s
+
     @num_reps.setter
     def num_reps(self, n):
         self._num_reps = n
@@ -144,7 +154,9 @@ class Genobuilder:
             )
         self._sim_source = s
 
-    def simulate_msprime(self, params, randomize=False, gauss=False, seed=None):
+        
+    def simulate_msprime(self, params, random=False, gauss=False):
+
         """Simulate demographic data, returning a tensor with n_reps number
         of genotype matrices"""
 
@@ -161,7 +173,7 @@ class Genobuilder:
                         mutation_rate=params["mutation rate"].rand(gauss),
                         recombination_rate=params["recombination rate"].rand(gauss),
                         num_replicates=self.num_reps,
-                        random_seed=seed,
+                        random_seed=self.seed,
                     )
 
                 else:
@@ -172,10 +184,11 @@ class Genobuilder:
                         mutation_rate=params["mutation rate"].val,
                         recombination_rate=params["recombination rate"].val,
                         num_replicates=self.num_reps,
-                        random_seed=seed,
+                        random_seed=self.seed,
                     )
 
         except TimeoutError:
+            print("time out!")
             timed_out = True
 
         mat = np.zeros((self.num_reps, self.num_samples, self.fixed_dim))
@@ -254,7 +267,7 @@ class Genobuilder:
         # Sort the list by size.
         geno.sort(key=lambda a: a[1], reverse=True)
         cum_weights = []
-        rng = random.Random(seed)
+        rng = random.Random(self.seed)
         for i, (chrom, size) in enumerate(geno):
             cum_weights.append(size if i == 0 else size + cum_weights[i - 1])
 
@@ -273,7 +286,9 @@ class Genobuilder:
             stdcontig = stdspecies.get_contig(
                 "chr" + str(chrom), length_multiplier=factor
             )
-            sims.append(stdengine.simulate(stdmodel, stdcontig, stdsamples))
+            sims.append(
+                stdengine.simulate(stdmodel, stdcontig, stdsamples, seed=self.seed)
+            )
 
         mat = np.zeros((self.num_reps, self.num_samples, self.fixed_dim))
 
@@ -320,7 +335,7 @@ class Genobuilder:
             gen1 = self._parse_empiricaldata(haplotype=0)
 
         elif self.source == "msprime":
-            gen1 = self.simulate_msprime(self.params, seed=None)
+            gen1 = self.simulate_msprime(self.params)
 
         print(f"generating {num_reps} genotype matrices from msprime")
         print(paramlist)
@@ -332,7 +347,7 @@ class Genobuilder:
         print(f"X data shape is: {X.shape}")
 
         # Split randomly into training and test data.
-        return train_test_split(X, y, test_size=0.1)
+        return train_test_split(X, y, test_size=0.1, random_state=self.seed)
 
     def generate_fakedata(self, num_reps, testlist=None):
 
@@ -686,48 +701,65 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "-s", "--source",
+        "-s",
+        "--source",
         help="Source engine for the genotype matrices from the real dataset to infer",
-        choices=["msprime", "stdpopsim", "empirical"], default="msprime"
+        choices=["msprime", "stdpopsim", "empirical"],
+        default="msprime",
     )
 
     parser.add_argument(
-        "-nh", "--number-haplotypes",
+        "-nh",
+        "--number-haplotypes",
         help="Number of haplotypes/rows that will conform the genotype matrices",
-        default=99, type=int,
+        default=99,
+        type=int,
     )
 
     parser.add_argument(
-        "-l", "--sequence-length",
+        "-l",
+        "--sequence-length",
         help="Length of the randomly sampled genome region in bp",
-        default=1000000, type=int,
+        default=1000000,
+        type=int,
     )
 
     parser.add_argument(
-        "-maf", "--maf-threshold",
+        "-maf",
+        "--maf-threshold",
         help="Threshold for the minor allele frequency to filter rare variants",
-        default=0.05, type=float,
+        default=0.05,
+        type=float,
     )
 
     parser.add_argument(
-        "-f", "--fixed-dimension",
+        "-f",
+        "--fixed-dimension",
         help="Number of columns to rescale the genmats after sampling the sequence",
-        default=128, type=int,
+        default=128,
+        type=int,
     )
 
     parser.add_argument(
-        "-n", "--num-rep",
+        "-n",
+        "--num-rep",
         help="Number of genotype matrices to generate",
         type=int,
     )
 
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         help="Name of the output file with the downloaded pickle object",
-        default="my_geno",
+        default="my_geno", type=str,
     )
 
-
+    parser.add_argument(
+        "-se",
+        "--seed",
+        help="Seed for stochastic parts of the algorithm for reproducibility",
+        default=None, type=int,
+    )
 
     # Get argument values from parser
     args = parser.parse_args()
@@ -758,6 +790,7 @@ if __name__ == "__main__":
         seq_len=args.sequence_length,
         maf_thresh=args.maf_threshold,
         fixed_dim=args.fixed_dimension,
+        seed=args.seed,
         scale=False,
     )
 
@@ -790,4 +823,4 @@ if __name__ == "__main__":
 
 
 # Command example:
-# python genobuilder.py download_genmats -n 1000 -s msprime -nh 99 -l 1e6 -maf 0.05 -f 128 -o test
+# python genobuilder.py download_genmats -n 1000 -s msprime -nh 99 -l 1e6 -maf 0.05 -f 128 -se 2020 -o test
