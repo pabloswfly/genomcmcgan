@@ -14,12 +14,12 @@ from genobuilder import *
 class MCMCGAN:
     """Class for building the coupled MCMC-Discriminator architecture"""
 
-    def __init__(self, genob, kernel_name, calibrated, discriminator=None):
+    def __init__(self, genob, kernel_name, discriminator=None, seed=None):
         super(MCMCGAN, self).__init__()
         self.genob = genob
         self.discriminator = discriminator
         self.kernel_name = kernel_name
-        self.calibrated = calibrated
+        self.seed = seed
 
     def set_discriminator(self, cnn):
         self.discriminator = cnn
@@ -234,7 +234,8 @@ class MCMCGAN:
         for p in proposals:
             if proposals[p].inferable:
                 if tf.math.less(x[i], proposals[p].bounds[0]) or tf.math.greater(
-                    x[i], proposals[p].bounds[1]):
+                    x[i], proposals[p].bounds[1]
+                ):
                     print("out")
                     # We reject these parameter values by returning probability 0.
                     return -np.inf
@@ -269,34 +270,16 @@ class MCMCGAN:
             raise NameError("kernel value must be either random walk, hmc or nuts")
 
         if self.kernel_name == "random walk":
-            if self.calibrated:
-                self.mcmc_kernel = tfp.mcmc.RandomWalkMetropolis(
-                    target_log_prob_fn=self.unnormalized_log_prob
-                )
-            else:
-                self.mcmc_kernel = tfp.mcmc.UncalibratedRandomWalk(
-                    target_log_prob_fn=self.unnormalized_log_prob
-                )
-
-            """
-          self.mcmc_kernel = tfp.mcmc.SimpleStepSizeAdaptation(
-                mcmc, num_adaptation_steps=int(self.num_burnin_steps * 0.8),
-                target_accept_prob=0.25)
-          """
+            self.mcmc_kernel = tfp.mcmc.RandomWalkMetropolis(
+                target_log_prob_fn=self.unnormalized_log_prob
+            )
 
         elif self.kernel_name == "hmc":
-            if self.calibrated:
-                mcmc = tfp.mcmc.HamiltonianMonteCarlo(
-                    target_log_prob_fn=self.unnormalized_log_prob,
-                    num_leapfrog_steps=3,
-                    step_size=step_size,
-                )
-            else:
-                mcmc = tfp.mcmc.UncalibratedHamiltonianMonteCarlo(
-                    target_log_prob_fn=self.unnormalized_log_prob,
-                    num_leapfrog_steps=3,
-                    step_size=step_size,
-                )
+            mcmc = tfp.mcmc.HamiltonianMonteCarlo(
+                target_log_prob_fn=self.unnormalized_log_prob,
+                num_leapfrog_steps=3,
+                step_size=step_size,
+            )
 
             self.mcmc_kernel = tfp.mcmc.SimpleStepSizeAdaptation(
                 mcmc,
@@ -328,6 +311,7 @@ class MCMCGAN:
 
         is_accepted = None
         log_acc_r = None
+        tf_seed = tf.constant(self.seed)
 
         if self.kernel_name == "random walk":
             samples = tfp.mcmc.sample_chain(
@@ -335,6 +319,7 @@ class MCMCGAN:
                 num_burnin_steps=self.num_burnin_steps,
                 current_state=self.initial_guess,
                 kernel=self.mcmc_kernel,
+                seed=tf_seed,
                 trace_fn=None,
             )
 
@@ -345,6 +330,7 @@ class MCMCGAN:
                 num_burnin_steps=self.num_burnin_steps,
                 current_state=self.initial_guess,
                 kernel=self.mcmc_kernel,
+                seed=tf_seed,
                 trace_fn=lambda _, pkr: [
                     pkr.inner_results.is_accepted,
                     pkr.inner_results.log_accept_ratio,
