@@ -194,7 +194,7 @@ class Genobuilder:
         mat = np.zeros((self.num_reps, self.num_samples, self.fixed_dim))
 
         if not timed_out:
-            rng = random.Random(seed)
+            rng = random.Random(self.seed)
             # For each tree sequence output from the simulation
             for i, ts in enumerate(sims):
                 mat[i] = self._resize_from_ts(ts, rng)
@@ -764,6 +764,7 @@ if __name__ == "__main__":
     # Get argument values from parser
     args = parser.parse_args()
     params_dict = OrderedDict()
+
 
     params_dict["recombination rate"] = Parameter(
         "recombination rate", -9, -10, (-11, -7), inferable=True, log=True
