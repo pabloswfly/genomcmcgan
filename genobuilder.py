@@ -154,8 +154,8 @@ class Genobuilder:
             )
         self._sim_source = s
 
-        
-    def simulate_msprime(self, params, random=False, gauss=False):
+
+    def simulate_msprime(self, params, randomize=False, gauss=False):
 
         """Simulate demographic data, returning a tensor with n_reps number
         of genotype matrices"""
