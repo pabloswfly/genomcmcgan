@@ -9,11 +9,11 @@ In a standard GAN, two neural networks called the Discriminator (D) and the Gene
 
 The script genobuilder.py contains the tools to create a Genobuilder() object. This data object can generate genotype matrices from variant data under a demographic scenario. The data can be generated from different sources, such as msprime, stdpopsim and empirical data coming from VCF files. The script can be run in the console, with a command like:
 
-> python genobuilder.py download_genmats -s msprime -n 1000 -nh 99 -l 1e6 -maf 0.05 -f 128 -o my_geno
+> python genobuilder.py download_genmats -s msprime -n 1000 -nh 99 -l 1e6 -maf 0.05 -f 128 -se 2020 -o my_geno
 
 Or using the long flags:
 
-> python genobuilder.py download_genmats --source msprime --num-rep 1000  --number-haplotypes 99 --sequence.length 1e6 --maf-threshold 0.05 --fixed-dimension 128 --output my_geno
+> python genobuilder.py download_genmats --source msprime --num-rep 1000  --number-haplotypes 99 --sequence.length 1e6 --maf-threshold 0.05 --fixed-dimension 128 --seed 2020 --output my_geno
 
 The different arguments and flags are:
 
@@ -31,6 +31,8 @@ The different arguments and flags are:
 
 - **-n/--num-rep:** Number of genotype matrices to generate.
 
+- **-se/--seed:** Seed for stochastic parts of the algorithm for reproducibility.
+
 - **-o/--output:** Name of the output file with the downloaded genobuilder pickle object "*\*.pkl*". In case of "download_genmats" function, the genotype matrices are stored in the "*\*_data.pkl*" file.
 
 For simplicity, the default parameters work pretty good, so we recommend to run:
@@ -42,11 +44,11 @@ For simplicity, the default parameters work pretty good, so we recommend to run:
 
 The script genomcmcgan.py contains the tool to run and train the MCMC-GAN model. To run the code, first the user need to generate a pickled file containing a genotype object (using genobuilder.py). Optionally, the user can also provide a pickle object containing a set of genotype matrices previously generated. The script can be run in the console, with a command like:
 
-> python genomcmcgan.py my_geno.pkl -d geno_data.pkl -k hmc -e 10 -n 100 -b 50
+> python genomcmcgan.py my_geno.pkl -d geno_data.pkl -k hmc -e 10 -n 100 -b 50 -se 2020
 
 Or using the long flags:
 
-> python genomcmcgan.py my_geno.pkl --data-path my_geno_data.pkl --kernel-name hmc --epochs 10 --num-mcmc-samples 100 --num-mcmc-burnin 50
+> python genomcmcgan.py my_geno.pkl --data-path my_geno_data.pkl --kernel-name hmc --epochs 10 --num-mcmc-samples 100 --num-mcmc-burnin 50 --seed 2020
 
 The different arguments and flags are:
 
@@ -63,6 +65,8 @@ The different arguments and flags are:
 - **-n/--num-mcmc-samples:** Number of MCMC samples to collect in each training iteration of MCMCGAN.
 
 - **-n/--num-mcmc-burnin:** Number of MCMC burn-in steps in each training iteration of MCMCGAN.
+
+- **-se/--seed:** Seed for stochastic parts of the algorithm for reproducibility.
 
 
 ## Library requirements:
