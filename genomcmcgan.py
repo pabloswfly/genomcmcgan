@@ -37,8 +37,12 @@ def run_genomcmcgan(
     discriminator_model,
     epochs,
     num_mcmc_samples,
-    num_mcmc_burning,
+    num_mcmc_burnin,
+    seed=None,
 ):
+
+    tf.random.set_seed(seed)
+    np.random.seed(seed)
 
     # Check if folder with results exists, and create it otherwise
     if not os.path.exists("./results"):
@@ -56,10 +60,10 @@ def run_genomcmcgan(
     # Prepare the training and validation datasets
     batch_size = 32
     train_data = tf.data.Dataset.from_tensor_slices((xtrain.astype("float32"), ytrain))
-    train_data = train_data.shuffle(len(ytrain)).cache().batch(batch_size).prefetch(2)
+    train_data = train_data.cache().batch(batch_size).prefetch(2)
 
     val_data = tf.data.Dataset.from_tensor_slices((xval.astype("float32"), yval))
-    val_data = val_data.shuffle(len(yval)).cache().batch(batch_size).prefetch(2)
+    val_data = val_data.cache().batch(batch_size).prefetch(2)
 
     # Prepare a list of genotype matrices from a range of parameter values
     # from msprime for testing
@@ -76,7 +80,7 @@ def run_genomcmcgan(
 
     print("Data simulation finished")
 
-    mcmcgan = MCMCGAN(genob=genob, kernel_name="hmc", calibrated=True)
+    mcmcgan = MCMCGAN(genob=genob, kernel_name="hmc", seed=seed)
 
     # Load a given discriminator or build one of the implemented ones
     if discriminator_model:
@@ -113,7 +117,7 @@ def run_genomcmcgan(
     tf.config.run_functions_eagerly(True)
     mcmcgan.setup_mcmc(
         num_mcmc_results=num_mcmc_samples,
-        num_burnin_steps=num_mcmc_burning,
+        num_burnin_steps=num_mcmc_burnin,
         initial_guess=initial_guesses,
     )
 
@@ -153,11 +157,11 @@ def run_genomcmcgan(
             (xtrain.astype("float32"), ytrain)
         )
         train_data = (
-            train_data.shuffle(len(ytrain)).cache().batch(batch_size).prefetch(16)
+            train_data.cache().batch(batch_size).prefetch(16)
         )
 
         val_data = tf.data.Dataset.from_tensor_slices((xval.astype("float32"), yval))
-        val_data = val_data.shuffle(len(yval)).cache().batch(batch_size).prefetch(16)
+        val_data = val_data.cache().batch(batch_size).prefetch(16)
 
         mcmcgan.discriminator.fit(
             train_data, None, batch_size, epochs, validation_data=val_data, shuffle=True
@@ -205,7 +209,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-m",
         "--discriminator-model",
-        help="Path to a cnn model to load as the discriminator of the MCMC-GAN",
+        help="Path to a cnn model to load as the discriminator of the MCMC-GAN as an .hdf5 file",
         type=str,
     )
 
@@ -227,10 +231,18 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "-b",
-        "--num-mcmc-burning",
-        help="Number of MCMC burning steps in each training iteration of MCMCGAN",
+        "--num-mcmc-burnin",
+        help="Number of MCMC burn-in steps in each training iteration of MCMCGAN",
         type=int,
         default=10,
+    )
+
+    parser.add_argument(
+        "-se",
+        "--seed",
+        help="Seed for stochastic parts of the algorithm for reproducibility",
+        default=None,
+        type=int,
     )
 
     # Get argument values from parser
@@ -243,8 +255,9 @@ if __name__ == "__main__":
         args.discriminator_model,
         args.epochs,
         args.num_mcmc_samples,
-        args.num_mcmc_burning,
+        args.num_mcmc_burnin,
+        args.seed,
     )
 
     # Command example:
-    # python genomcmcgan.py geno.pkl -d geno_genmats.pkl -e 3 -n 10 -b 5
+    # python genomcmcgan.py geno.pkl -d geno_genmats.pkl -k hmc -e 3 -n 10 -b 5 -se 2020
