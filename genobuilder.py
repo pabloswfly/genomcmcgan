@@ -117,8 +117,8 @@ class Genobuilder:
         self._maf_thresh = maf
 
     @seq_len.setter
-    def seq_len(self, l):
-        self._seq_len = int(l)
+    def seq_len(self, seqlen):
+        self._seq_len = int(seqlen)
 
     @source.setter
     def source(self, s):
@@ -154,9 +154,7 @@ class Genobuilder:
             )
         self._sim_source = s
 
-
     def simulate_msprime(self, params, randomize=False, gauss=False):
-
         """Simulate demographic data, returning a tensor with n_reps number
         of genotype matrices"""
 
@@ -448,7 +446,7 @@ class Genobuilder:
         mask = load_mask(mask_file, min_len=10000) if mask_file else None
 
         rng = random.Random(seed)
-        chroms, slices, mask_ranges, pos = [], [], [], []
+        chroms, slices, pos = [], [], []
 
         while len(chroms) < self.num_reps:
             chrom, size = rng.choices(geno, cum_weights=cum_weights)[0]
@@ -505,14 +503,14 @@ class Genobuilder:
 
         return m.astype(float)
 
-    def _resize_from_zarr(self, mat, pos, alts, flip=True):
+    def _resize_from_zarr(self, mat, pos, alts, rng, flip=True):
         """Resizes a matrix using a sum window, given a genotype matrix,
         positions vector,sequence length and the desired fixed size
         of the new matrix"""
 
         # Initialize empty matrix with the new dimensions
         m = np.zeros((mat.shape[1], self.fixed_dim), dtype=mat.dtype)
-        flip = {0: 1, 1: 0, -1: -1}
+        ac_thresh = self.maf_thresh * mat.shape[1]
 
         # Fill in the resized matrix
         for _pos, _gt, _alt in zip(pos, mat, alts):
@@ -524,18 +522,17 @@ class Genobuilder:
                 continue
             """
 
-            # Calculate allele frequency
-            af = np.mean(_gt)
-
             # Filter by MAF
-            if self.maf_thresh is not None:
-                if af < self.maf_thresh or af > 1 - self.maf_thresh:
-                    continue
+            ac1 = np.sum(_gt)
+            ac0 = len(_gt) - ac1
+            if min(ac0, ac1) < ac_thresh:
+                continue
 
-            # Polarise the matrix by major allele frequency.
+            # Polarise 0 and 1 in genotype matrix by major allele frequency.
+            # If allele counts are the same, randomly choose a major allele.
             if flip:
-                if af > 0.5 or (af == 0.5 and random.Random() > 0.5):
-                    _gt = [flip[b] for b in _gt]
+                if ac1 > ac0 or (ac1 == ac0 and rng.random() > 0.5):
+                    _gt ^= 1
 
             j = int(_pos * self.fixed_dim / self.seq_len) - 1
             np.add(m[:, j], _gt, out=m[:, j], where=_gt != -1)
@@ -650,19 +647,34 @@ def locate(sorted_idx, start=None, stop=None):
     Change it a little for copyright lol"""
 
     start_idx = bisect.bisect_left(sorted_idx, start) if start is not None else 0
-    stop_idx = bisect.bisect_right(sorted_idx, stop) if stop is not None else len(v)
+    stop_idx = (
+        bisect.bisect_right(sorted_idx, stop) if stop is not None else len(sorted_idx)
+    )
 
     return slice(start_idx, stop_idx)
+
+
+def samples_from_population(pop_file):
+    """Return a list of sample IDs given a population file from the
+    online repository of 1000 genomes project"""
+
+    population = np.loadtxt(pop_file, dtype=str, delimiter="\t", skiprows=1)
+
+    return population[:, 0]
 
 
 def vcf2zarr(vcf_files, pop_file, zarr_path):
     # Two veery good tutorials:
     # http://alimanfoo.github.io/2018/04/09/selecting-variants.html
     # http://alimanfoo.github.io/2017/06/14/read-vcf.html
+    # TODO: Refactor to work without pysam and allel
 
     # Get a list of the wanted samples from one population
     # which are found in the VCF files
+    # The files must be numbered, and that number must be substituted
+    # in the input path string with {n}.
     import pysam
+    import allel
 
     first_vcf = pysam.VariantFile(vcf_files.replace("{n}", "1"))
     wanted_samples = samples_from_population(pop_file)
@@ -751,20 +763,21 @@ if __name__ == "__main__":
         "-o",
         "--output",
         help="Name of the output file with the downloaded pickle object",
-        default="my_geno", type=str,
+        default="my_geno",
+        type=str,
     )
 
     parser.add_argument(
         "-se",
         "--seed",
         help="Seed for stochastic parts of the algorithm for reproducibility",
-        default=None, type=int,
+        default=None,
+        type=int,
     )
 
     # Get argument values from parser
     args = parser.parse_args()
     params_dict = OrderedDict()
-
 
     params_dict["recombination rate"] = Parameter(
         "recombination rate", -9, -10, (-11, -7), inferable=True, log=True
