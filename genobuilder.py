@@ -1,6 +1,7 @@
-import signal
+import os
 from contextlib import contextmanager
 from collections import OrderedDict
+import concurrent.futures
 import msprime
 import pickle
 import argparse
@@ -13,25 +14,37 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from parameter import Parameter
 
+_ex = None
 
-def raise_timeout(signum, frame):
-    raise TimeoutError
+def executor(p):
+    global _ex
+    if _ex is None:
+        _ex = concurrent.futures.ProcessPoolExecutor(max_workers=p)
+    return _ex
 
+def do_sim(args):
+    genob, params, randomize, gauss, seed = args
+    rng = random.Random(seed)
 
-@contextmanager
-def timeout(time):
-    # Register a function to raise a TimeoutError on the signal.
-    signal.signal(signal.SIGALRM, raise_timeout)
-    # Schedule the signal to be sent after ``time``.
-    signal.alarm(time)
+    Ne, mu, r = [
+        params[param].rand(gauss) if randomize else params[param].val
+        for param in ("effective size", "mutation rate", "recombination rate")
+    ]
 
-    try:
-        yield
-    finally:
-        # Unregister the signal so it won't be triggered
-        # if the timeout is not reached.
-        signal.signal(signal.SIGALRM, signal.SIG_IGN)
-
+    ts = msprime.simulate(
+            sample_size=genob.num_samples,
+            Ne=Ne,
+            length=genob.seq_len,
+            mutation_rate=mu,
+            recombination_rate=r,
+            random_seed=rng.randrange(1, 2**32),
+        )
+    m = genob._resize_from_ts(ts, rng)
+    # Scale genotype matrices from [0, 1] to [-1, 1]. If we were to use
+    # a generator, this scale should be done with tanh function
+    if genob.scale:
+        m = scale_matrix(m)
+    return m
 
 class Genobuilder:
     """Class for building genotype matrices from msprime, stdpopsim
@@ -47,6 +60,7 @@ class Genobuilder:
         fixed_dim=128,
         seed=None,
         scale=False,
+        parallelism=0,
         **kwargs,
     ):
         self._num_samples = num_samples
@@ -57,6 +71,7 @@ class Genobuilder:
         self._seed = seed
         self._scale = scale
         self._num_reps = None
+        self.parallelism = parallelism
         super(Genobuilder, self).__init__(**kwargs)
 
     def set_parameters(self, sim_source, params):
@@ -103,6 +118,10 @@ class Genobuilder:
     @property
     def scale(self):
         return self._scale
+
+    @property
+    def parallelism(self):
+        return self._parallelism
 
     @num_samples.setter
     def num_samples(self, n):
@@ -154,53 +173,26 @@ class Genobuilder:
             )
         self._sim_source = s
 
+    @parallelism.setter
+    def parallelism(self, p):
+        if p == 0:
+            p = os.cpu_count()
+        self._parallelism = p
+
     def simulate_msprime(self, params, randomize=False, gauss=False):
         """Simulate demographic data, returning a tensor with n_reps number
         of genotype matrices"""
-
-        timed_out = False
-
-        try:
-            with timeout(int(0.5 * self.num_reps)):
-
-                if randomize:
-                    sims = msprime.simulate(
-                        sample_size=self.num_samples,
-                        Ne=params["effective size"].rand(gauss),
-                        length=self.seq_len,
-                        mutation_rate=params["mutation rate"].rand(gauss),
-                        recombination_rate=params["recombination rate"].rand(gauss),
-                        num_replicates=self.num_reps,
-                        random_seed=self.seed,
-                    )
-
-                else:
-                    sims = msprime.simulate(
-                        sample_size=self.num_samples,
-                        Ne=params["effective size"].val,
-                        length=self.seq_len,
-                        mutation_rate=params["mutation rate"].val,
-                        recombination_rate=params["recombination rate"].val,
-                        num_replicates=self.num_reps,
-                        random_seed=self.seed,
-                    )
-
-        except TimeoutError:
-            print("time out!")
-            timed_out = True
-
+        rng = random.Random(self.seed)
+        args = [(self, params, randomize, gauss, rng.randrange(1, 2**32))
+                for _ in range(self.num_reps)]
         mat = np.zeros((self.num_reps, self.num_samples, self.fixed_dim))
-
-        if not timed_out:
-            rng = random.Random(self.seed)
-            # For each tree sequence output from the simulation
-            for i, ts in enumerate(sims):
-                mat[i] = self._resize_from_ts(ts, rng)
-
-            # Scale genotype matrices from [0, 1] to [-1, 1]. If we were to use
-            # a generator, this scale should be done with tanh function
-            if self.scale:
-                mat = scale_matrix(mat)
+        ex = executor(self.parallelism)
+        timeout = 0.5 * self.num_reps
+        try:
+            for i, m in enumerate(ex.map(do_sim, args, timeout=timeout)):
+                mat[i] = m
+        except concurrent.futures.TimeoutError:
+            print("time out!")
 
         # Expand dimension by 1 (add channel dim). -1 stands for last axis.
         mat = np.expand_dims(mat, axis=-1)
@@ -775,6 +767,14 @@ if __name__ == "__main__":
         type=int,
     )
 
+    parser.add_argument(
+        "-p",
+        "--parallelism",
+        help="Number of cores to use for simulation. If set to zero, os.cpu_count() is used.",
+        default=0,
+        type=int,
+    )
+
     # Get argument values from parser
     args = parser.parse_args()
     params_dict = OrderedDict()
@@ -806,6 +806,7 @@ if __name__ == "__main__":
         fixed_dim=args.fixed_dimension,
         seed=args.seed,
         scale=False,
+        parallelism=args.parallelism
     )
 
     if len(params_dict.keys()) >= 1:
