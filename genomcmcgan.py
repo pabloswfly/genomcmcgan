@@ -10,16 +10,12 @@
 import pickle
 import time
 import os
+import argparse
 import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow import keras
-import argparse
-
-from mcmcgan import MCMCGAN, plot_average
-from genobuilder import *
-
+from mcmcgan import MCMCGAN
+from genobuilder import Genobuilder
 
 gpus = tf.config.experimental.list_physical_devices("GPU")
 if gpus:
@@ -156,9 +152,7 @@ def run_genomcmcgan(
         train_data = tf.data.Dataset.from_tensor_slices(
             (xtrain.astype("float32"), ytrain)
         )
-        train_data = (
-            train_data.cache().batch(batch_size).prefetch(16)
-        )
+        train_data = train_data.cache().batch(batch_size).prefetch(16)
 
         val_data = tf.data.Dataset.from_tensor_slices((xval.astype("float32"), yval))
         val_data = val_data.cache().batch(batch_size).prefetch(16)

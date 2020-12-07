@@ -8,7 +8,6 @@ import tensorflow_addons as tfa
 
 from symmetric import Symmetric
 from training_utils import DMonitor, DMonitor2, ConfusionMatrix
-from genobuilder import *
 
 
 class MCMCGAN:
@@ -394,22 +393,3 @@ class MCMCGAN:
             )
             # plt.show()
             plt.clf()
-
-
-def plot_average(x, y, param_name, name, log_scale, bins=10):
-
-    x, y = np.array(x), np.array(y)
-    plotx = np.mean(x.reshape((-1, bins)), axis=1)
-    ploty = np.mean(y.reshape((-1, bins)), axis=1)
-
-    if log_scale:
-        plt.plot(np.log10(plotx), ploty)
-    else:
-        plt.plot(plotx, ploty)
-
-    plt.title(name)
-    plt.ylabel("prediction D(x)")
-    plt.xlabel(param_name)
-    plt.ylim((0, 1))
-    plt.savefig(f"./results/{name}.png")
-    plt.clf()

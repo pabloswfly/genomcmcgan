@@ -11,8 +11,9 @@ class DMonitor(keras.callbacks.Callback):
     monitors the cnn statistical power for paramter inference, saving the
     training results as a GIF"""
 
-    def __init__(self, testdata, nmod, genobuilder, it, bins=100):
+    def __init__(self, param_values, testdata, nmod, genobuilder, it, bins=100):
         self.testdata = testdata
+        self.param_values = param_values
         self.nmod = nmod
         self.genob = genobuilder
         self.bins = bins
@@ -25,11 +26,12 @@ class DMonitor(keras.callbacks.Callback):
         predictions = self.model.predict(self.testdata)
 
         # Plot the discriminator prediction function
-        name = (f"D{self.nmod}test_{self.genob.param_name}_" \
-                f"{epoch}e_it{self.iteration}")
+        name = (
+            f"D{self.nmod}test_{self.genob.param_name}_" f"{epoch}e_it{self.iteration}"
+        )
 
         plot_average(
-            param_values,
+            self.param_values,
             predictions,
             self.genob.param_name,
             name,
@@ -113,13 +115,17 @@ class ConfusionMatrix(keras.callbacks.Callback):
         plt.yticks(tick_marks, self.classes)
 
         # Loop over data dimensions and create text annotations.
-        fmt = ".2f"
         thresh = cm.max() / 2.0
         for i in range(cm.shape[0]):
             for j in range(cm.shape[1]):
                 plt.text(
-                    j, i, f"{cm[i, j]*100:.2f}%", ha="center", va="center",
-                    fontsize=16, color="white" if cm[i, j] > thresh else "black",
+                    j,
+                    i,
+                    f"{cm[i, j]*100:.2f}%",
+                    ha="center",
+                    va="center",
+                    fontsize=16,
+                    color="white" if cm[i, j] > thresh else "black",
                 )
 
         fig.tight_layout()
@@ -134,3 +140,22 @@ class ConfusionMatrix(keras.callbacks.Callback):
         plt.title("Confusion Matrix recombination rate")
         plt.show()
         plt.pause(0.001)
+
+
+def plot_average(x, y, param_name, name, log_scale, bins=10):
+
+    x, y = np.array(x), np.array(y)
+    plotx = np.mean(x.reshape((-1, bins)), axis=1)
+    ploty = np.mean(y.reshape((-1, bins)), axis=1)
+
+    if log_scale:
+        plt.plot(np.log10(plotx), ploty)
+    else:
+        plt.plot(plotx, ploty)
+
+    plt.title(name)
+    plt.ylabel("prediction D(x)")
+    plt.xlabel(param_name)
+    plt.ylim((0, 1))
+    plt.savefig(f"./results/{name}.png")
+    plt.clf()
