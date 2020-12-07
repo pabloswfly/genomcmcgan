@@ -35,6 +35,7 @@ def run_genomcmcgan(
     num_mcmc_samples,
     num_mcmc_burnin,
     seed=None,
+    parallelism=0,
 ):
 
     tf.random.set_seed(seed)
@@ -46,6 +47,8 @@ def run_genomcmcgan(
 
     with open(genobuilder, "rb") as obj:
         genob = pickle.load(obj)
+
+    genob.parallelism = parallelism
 
     if data_path:
         with open(data_path, "rb") as obj:
@@ -239,6 +242,14 @@ if __name__ == "__main__":
         type=int,
     )
 
+    parser.add_argument(
+        "-p",
+        "--parallelism",
+        help="Number of cores to use for simulation. If set to zero, os.cpu_count() is used.",
+        default=0,
+        type=int,
+    )
+
     # Get argument values from parser
     args = parser.parse_args()
 
@@ -251,6 +262,7 @@ if __name__ == "__main__":
         args.num_mcmc_samples,
         args.num_mcmc_burnin,
         args.seed,
+        args.parallelism,
     )
 
     # Command example:
