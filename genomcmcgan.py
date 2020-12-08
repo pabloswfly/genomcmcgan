@@ -34,8 +34,8 @@ def run_genomcmcgan(
     epochs,
     num_mcmc_samples,
     num_mcmc_burnin,
-    seed=None,
-    parallelism=0,
+    seed,
+    parallelism,
 ):
 
     tf.random.set_seed(seed)
@@ -79,7 +79,7 @@ def run_genomcmcgan(
 
     print("Data simulation finished")
 
-    mcmcgan = MCMCGAN(genob=genob, kernel_name="hmc", seed=seed)
+    mcmcgan = MCMCGAN(genob, kernel_name, seed)
 
     # Load a given discriminator or build one of the implemented ones
     if discriminator_model:
@@ -112,46 +112,48 @@ def run_genomcmcgan(
             inferable_params.append(p)
 
     initial_guesses = tf.constant([float(p.initial_guess) for p in inferable_params])
+    step_sizes = tf.constant([float(p.initial_guess * 0.1) for p in inferable_params])
     mcmcgan.discriminator.run_eagerly = True
     tf.config.run_functions_eagerly(True)
     mcmcgan.setup_mcmc(
-        num_mcmc_results=num_mcmc_samples,
-        num_burnin_steps=num_mcmc_burnin,
-        initial_guess=initial_guesses,
+        num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1
     )
 
-    n_reps = 1000
-    max_num_iters = 3
+    max_num_iters = 5
     convergence = False
     it = 1
 
     while not convergence and max_num_iters != it:
 
+        print("Starting the MCMC sampling chain")
         start_t = time.time()
 
-        # Uncalibrated kernels doesn't converge to the desired distribution.
-        # MetropolisHastings(UncalibratedHamiltonianMonteCarlo(...)) is functionally
-        # the same as HamiltonianMonteCarlo(...).
-        print("Starting the MCMC sampling chain")
         sample_mean, sample_stddev, is_accepted, log_acc_rate = mcmcgan.run_chain()
-        print(f"Is accepted: {is_accepted}, acc_rate: {log_acc_rate}")
+        # print(f"Is accepted: {is_accepted}, acc_rate: {log_acc_rate}")
 
         # Draw traceplot and histogram of collected samples
         mcmcgan.traceplot_samples(inferable_params, it)
         mcmcgan.hist_samples(inferable_params, it)
 
-        initial_guesses = []
-        for j, p in enumerate(inferable_params):
-            mean = np.mean(mcmcgan.samples[:, j])
-            std = np.std(mcmcgan.samples[:, j])
-            print(f"{p.name} samples with mean {mean} and std {std}")
-            mcmcgan.genob.params[p.name].set_gauss(mean, std)
-            initial_guesses.append(float(mean))
+        for i, p in enumerate(inferable_params):
+            p.proposals = mcmcgan.samples[:, i].numpy()
 
-        mcmcgan.initial_guess = tf.constant(initial_guesses)
+        means = np.mean(mcmcgan.samples, axis=0)
+        stds = np.std(mcmcgan.samples, axis=0)
+        for j, p in enumerate(inferable_params):
+            print(f"{p.name} samples with mean {means[j]} and std {stds[j]}")
+        mcmcgan.initial_guess = tf.constant(means)
+        # mcmcgan.step_sizes = tf.constant(stds)
+        mcmcgan.step_sizes = tf.constant(np.sqrt(stds))
+        mcmcgan.setup_mcmc(
+            num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1
+        )
 
         # Prepare the training and validation datasets
-        xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(n_reps, gauss=True)
+        # xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(n_reps)
+        xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(
+            num_mcmc_samples, proposals=True
+        )
         train_data = tf.data.Dataset.from_tensor_slices(
             (xtrain.astype("float32"), ytrain)
         )
@@ -161,7 +163,7 @@ def run_genomcmcgan(
         val_data = val_data.cache().batch(batch_size).prefetch(16)
 
         mcmcgan.discriminator.fit(
-            train_data, None, batch_size, epochs, validation_data=val_data, shuffle=True
+            train_data, None, batch_size, epochs, val_data, shuffle=True
         )
 
         it += 1

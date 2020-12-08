@@ -11,6 +11,7 @@ class Parameter:
             self._val = np.float_power(10, val)
         else:
             self._val = val
+        self._proposals = []
         self.bounds = bounds
         self.log = log
         self.initial_guess = initial_guess
@@ -21,6 +22,10 @@ class Parameter:
     def val(self):
         return self._val
 
+    @property
+    def proposals(self):
+        return self._proposals
+
     @val.setter
     def val(self, x):
         if self.log:
@@ -28,28 +33,22 @@ class Parameter:
         else:
             self._val = x
 
-    def set_gauss(self, mean, std):
+    @proposals.setter
+    def proposals(self, prop):
+        self._proposals = prop
 
-        self.gauss_mean = mean
-        self.gauss_std = std
+    def prop(self, i):
+        return self.proposals[i]
 
-    def rand(self, gauss=False):
+    def rand(self):
 
         if not self.inferable:
             return self._val
 
-        if gauss:
-            if self.log:
-                return np.float_power(
-                    10, np.random.normal(self.gauss_mean, self.gauss_std)
-                )
-            else:
-                return np.random.normal(self.gauss_mean, self.gauss_std)
-        else:
-            min, max = self.bounds
-            x = np.random.uniform(min, max)
+        min, max = self.bounds
+        x = np.random.uniform(min, max)
 
-            if self.log:
-                return np.float_power(10, x)
-            else:
-                return x
+        if self.log:
+            return np.float_power(10, x)
+        else:
+            return x
