@@ -5,7 +5,6 @@ import tensorflow as tf
 from tensorflow import keras
 import tensorflow_probability as tfp
 import tensorflow_addons as tfa
-from collections import OrderedDict
 
 from symmetric import Symmetric
 from training_utils import DMonitor, DMonitor2, ConfusionMatrix
@@ -227,6 +226,7 @@ class MCMCGAN:
     def _unnormalized_log_prob(self, x):
 
         import copy
+
         proposals = copy.deepcopy(self.genob.params)
 
         i = 0
@@ -318,7 +318,7 @@ class MCMCGAN:
         is_accepted = None
         log_acc_r = None
         tf_seed = tf.constant(self.seed)
-        print(f'Selected mcmc kernel is {self.kernel_name}')
+        print(f"Selected mcmc kernel is {self.kernel_name}")
 
         if self.kernel_name == "random walk":
             samples = tfp.mcmc.sample_chain(

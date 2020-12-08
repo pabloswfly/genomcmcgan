@@ -37,7 +37,6 @@ class Parameter:
     def proposals(self, prop):
         self._proposals = prop
 
-
     def prop(self, i):
         return self.proposals[i]
 

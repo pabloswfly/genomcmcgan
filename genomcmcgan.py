@@ -112,7 +112,7 @@ def run_genomcmcgan(
             inferable_params.append(p)
 
     initial_guesses = tf.constant([float(p.initial_guess) for p in inferable_params])
-    step_sizes = tf.constant([float(p.initial_guess*0.1) for p in inferable_params])
+    step_sizes = tf.constant([float(p.initial_guess * 0.1) for p in inferable_params])
     mcmcgan.discriminator.run_eagerly = True
     tf.config.run_functions_eagerly(True)
     mcmcgan.setup_mcmc(
@@ -129,7 +129,7 @@ def run_genomcmcgan(
         start_t = time.time()
 
         sample_mean, sample_stddev, is_accepted, log_acc_rate = mcmcgan.run_chain()
-        #print(f"Is accepted: {is_accepted}, acc_rate: {log_acc_rate}")
+        # print(f"Is accepted: {is_accepted}, acc_rate: {log_acc_rate}")
 
         # Draw traceplot and histogram of collected samples
         mcmcgan.traceplot_samples(inferable_params, it)
@@ -151,7 +151,9 @@ def run_genomcmcgan(
 
         # Prepare the training and validation datasets
         # xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(n_reps)
-        xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(num_mcmc_samples, proposals=True)
+        xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(
+            num_mcmc_samples, proposals=True
+        )
         train_data = tf.data.Dataset.from_tensor_slices(
             (xtrain.astype("float32"), ytrain)
         )

@@ -613,7 +613,6 @@ def get_chrom_size(chrom):
     return length[chrom]
 
 
-
 def draw_genmat(img, name):
 
     plt.imshow(img, cmap="winter")
