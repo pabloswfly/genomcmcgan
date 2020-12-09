@@ -13,7 +13,7 @@ from training_utils import DMonitor, DMonitor2, ConfusionMatrix
 class MCMCGAN:
     """Class for building the coupled MCMC-Discriminator architecture"""
 
-    def __init__(self, genob, kernel_name, discriminator=None, seed=None):
+    def __init__(self, genob, kernel_name, seed=None, discriminator=None):
         super(MCMCGAN, self).__init__()
         self.genob = genob
         self.discriminator = discriminator
@@ -209,7 +209,7 @@ class MCMCGAN:
 
         self.discriminator = cnn
 
-    def D(self, proposals, num_reps=32):
+    def D(self, x, num_reps=32):
         """
         Simulate with parameters `x`, then classify the simulations with the
         discriminator. Returns the average over `num_replicates` simulations.
@@ -218,16 +218,16 @@ class MCMCGAN:
         self.genob.num_reps = num_reps
 
         return tf.reduce_mean(
-            self.discriminator.predict(
-                self.genob.simulate_msprime(proposals).astype("float32")
-            )
+            self.discriminator.predict(self.genob.simulate_msprime(x).astype("float32"))
         )
 
     # Where `D(x)` is the average discriminator output from n independent
     # simulations (which are simulated with parameters `x`).
     def _unnormalized_log_prob(self, x):
 
-        proposals = self.genob.params.copy()
+        import copy
+
+        proposals = copy.deepcopy(self.genob.params)
 
         i = 0
         for p in proposals:
@@ -235,13 +235,12 @@ class MCMCGAN:
                 if tf.math.less(x[i], proposals[p].bounds[0]) or tf.math.greater(
                     x[i], proposals[p].bounds[1]
                 ):
-                    print("out")
                     # We reject these parameter values by returning probability 0.
                     return -np.inf
                 else:
                     proposals[p].val = x[i]
+                    print(f"{proposals[p].name}: {proposals[p].val}")
 
-                print(f"{proposals[p].name}: {proposals[p].val}")
                 i += 1
 
         score = self.D(proposals)
@@ -256,14 +255,18 @@ class MCMCGAN:
         num_mcmc_results,
         num_burnin_steps,
         initial_guess,
-        step_size=np.float64(1.0),
+        step_sizes,
+        steps_between_results,
     ):
 
         # Initialize the HMC transition kernel.
         self.num_mcmc_results = num_mcmc_results
         self.num_burnin_steps = num_burnin_steps
         self.initial_guess = initial_guess
+        self.step_sizes = step_sizes
+        self.steps_between_results = steps_between_results
         self.samples = None
+        tf.print(self.step_sizes)
 
         if self.kernel_name not in ["random walk", "hmc", "nuts"]:
             raise NameError("kernel value must be either random walk, hmc or nuts")
@@ -276,8 +279,8 @@ class MCMCGAN:
         elif self.kernel_name == "hmc":
             mcmc = tfp.mcmc.HamiltonianMonteCarlo(
                 target_log_prob_fn=self.unnormalized_log_prob,
-                num_leapfrog_steps=3,
-                step_size=step_size,
+                num_leapfrog_steps=6,
+                step_size=self.step_sizes,
             )
 
             self.mcmc_kernel = tfp.mcmc.SimpleStepSizeAdaptation(
@@ -289,7 +292,7 @@ class MCMCGAN:
         elif self.kernel_name == "nuts":
             mcmc = tfp.mcmc.NoUTurnSampler(
                 target_log_prob_fn=self.unnormalized_log_prob,
-                step_size=step_size,
+                step_size=self.step_sizes,
                 max_tree_depth=10,
                 max_energy_diff=1000.0,
             )
@@ -297,6 +300,7 @@ class MCMCGAN:
             self.mcmc_kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
                 mcmc,
                 num_adaptation_steps=int(self.num_burnin_steps * 0.8),
+                target_accept_prob=0.75,
                 step_size_setter_fn=lambda pkr, new_step_size: pkr._replace(
                     step_size=new_step_size
                 ),
@@ -305,12 +309,16 @@ class MCMCGAN:
             )
 
     # Run the chain (with burn-in).
-    @tf.function
+    # autograph=False is recommended by the TFP team. It is related to how
+    # control-flow statements are handled.
+    # experimental_compile=True for higher efficiency in XLA_GPUs, TPUs, etc...
+    @tf.function(autograph=False, experimental_compile=True)
     def run_chain(self):
 
         is_accepted = None
         log_acc_r = None
         tf_seed = tf.constant(self.seed)
+        print(f"Selected mcmc kernel is {self.kernel_name}")
 
         if self.kernel_name == "random walk":
             samples = tfp.mcmc.sample_chain(
@@ -320,6 +328,7 @@ class MCMCGAN:
                 kernel=self.mcmc_kernel,
                 seed=tf_seed,
                 trace_fn=None,
+                steps_between_results=self.steps_between_results,
             )
 
         elif self.kernel_name in ["hmc", "nuts"]:
@@ -330,6 +339,7 @@ class MCMCGAN:
                 current_state=self.initial_guess,
                 kernel=self.mcmc_kernel,
                 seed=tf_seed,
+                num_steps_between_results=self.steps_between_results,
                 trace_fn=lambda _, pkr: [
                     pkr.inner_results.is_accepted,
                     pkr.inner_results.log_accept_ratio,

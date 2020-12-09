@@ -1,5 +1,4 @@
 import os
-from contextlib import contextmanager
 from collections import OrderedDict
 import concurrent.futures
 import msprime
@@ -16,35 +15,40 @@ from parameter import Parameter
 
 _ex = None
 
+
 def executor(p):
     global _ex
     if _ex is None:
         _ex = concurrent.futures.ProcessPoolExecutor(max_workers=p)
     return _ex
 
+
 def do_sim(args):
-    genob, params, randomize, gauss, seed = args
+    genob, params, randomize, i, proposals, seed = args
     rng = random.Random(seed)
 
-    Ne, mu, r = [
-        params[param].rand(gauss) if randomize else params[param].val
-        for param in ("effective size", "mutation rate", "recombination rate")
-    ]
+    if proposals:
+        Ne, mu, r = [
+            params[p].prop(i) if params[p].inferable else params[p].val
+            for p in ("effective size", "mutation rate", "recombination rate")
+        ]
+    else:
+        Ne, mu, r = [
+            params[p].rand() if randomize else params[p].val
+            for p in ("effective size", "mutation rate", "recombination rate")
+        ]
 
     ts = msprime.simulate(
-            sample_size=genob.num_samples,
-            Ne=Ne,
-            length=genob.seq_len,
-            mutation_rate=mu,
-            recombination_rate=r,
-            random_seed=rng.randrange(1, 2**32),
-        )
-    m = genob._resize_from_ts(ts, rng)
-    # Scale genotype matrices from [0, 1] to [-1, 1]. If we were to use
-    # a generator, this scale should be done with tanh function
-    if genob.scale:
-        m = scale_matrix(m)
-    return m
+        sample_size=genob.num_samples,
+        Ne=Ne,
+        length=genob.seq_len,
+        mutation_rate=mu,
+        recombination_rate=r,
+        random_seed=seed,
+    )
+
+    return genob._resize_from_ts(ts, rng)
+
 
 class Genobuilder:
     """Class for building genotype matrices from msprime, stdpopsim
@@ -59,7 +63,6 @@ class Genobuilder:
         maf_thresh,
         fixed_dim=128,
         seed=None,
-        scale=False,
         parallelism=0,
         **kwargs,
     ):
@@ -69,7 +72,6 @@ class Genobuilder:
         self._source = source
         self._fixed_dim = fixed_dim
         self._seed = seed
-        self._scale = scale
         self._num_reps = None
         self.parallelism = parallelism
         super(Genobuilder, self).__init__(**kwargs)
@@ -114,10 +116,6 @@ class Genobuilder:
     @property
     def sim_source(self):
         return self._sim_source
-
-    @property
-    def scale(self):
-        return self._scale
 
     @property
     def parallelism(self):
@@ -179,12 +177,16 @@ class Genobuilder:
             p = os.cpu_count()
         self._parallelism = p
 
-    def simulate_msprime(self, params, randomize=False, gauss=False):
+    def simulate_msprime(self, params, randomize=False, proposals=False):
         """Simulate demographic data, returning a tensor with n_reps number
         of genotype matrices"""
+
         rng = random.Random(self.seed)
-        args = [(self, params, randomize, gauss, rng.randrange(1, 2**32))
-                for _ in range(self.num_reps)]
+
+        args = [
+            (self, params, randomize, i, proposals, rng.randrange(1, 2 ** 32))
+            for i in range(self.num_reps)
+        ]
         mat = np.zeros((self.num_reps, self.num_samples, self.fixed_dim))
         ex = executor(self.parallelism)
         timeout = 0.5 * self.num_reps
@@ -237,9 +239,6 @@ class Genobuilder:
             relative_pos = pos_zarr - pos
 
             data[i] = self._resize_from_zarr(hap, relative_pos, alt_zarr)
-
-        if self.scale:
-            data = scale_matrix(data)
 
         data = np.expand_dims(data, axis=-1)
 
@@ -296,17 +295,12 @@ class Genobuilder:
             else:
                 mat[i] = self._resize_from_ts(ts, rng)
 
-        # Scale genotype matrices from [0, 1] to [-1, 1]. If we were to use
-        # a generator, this scale should be done with tanh function
-        if self.scale:
-            mat = scale_matrix(mat)
-
         # Expand dimension by 1 (add channel dim). -1 stands for last axis.
         mat = np.expand_dims(mat, axis=-1)
 
         return mat
 
-    def generate_data(self, num_reps, paramlist=None, gauss=False):
+    def generate_data(self, num_reps, proposals=False):
         # Generate (X, y) data from demographic simulations.
 
         self.num_reps = num_reps
@@ -328,9 +322,7 @@ class Genobuilder:
             gen1 = self.simulate_msprime(self.params)
 
         print(f"generating {num_reps} genotype matrices from msprime")
-        print(paramlist)
-
-        gen0 = self.simulate_msprime(self.params, randomize=True, gauss=gauss)
+        gen0 = self.simulate_msprime(self.params, randomize=True, proposals=proposals)
 
         X = np.concatenate((gen1, gen0))
         y = np.concatenate((np.ones((num_reps)), np.zeros((num_reps))))
@@ -621,11 +613,6 @@ def get_chrom_size(chrom):
     return length[chrom]
 
 
-def scale_matrix(mat):
-    """Scale matrix values within [-1, 1] range"""
-    return mat * 2 / np.max(mat) - 1
-
-
 def draw_genmat(img, name):
 
     plt.imshow(img, cmap="winter")
@@ -780,23 +767,14 @@ if __name__ == "__main__":
     params_dict = OrderedDict()
 
     params_dict["recombination rate"] = Parameter(
-        "recombination rate", -9, -10, (-11, -7), inferable=True, log=True
+        "recombination rate", 1.25e-9, 1e-10, (1e-11, 1e-7), inferable=False
     )
     params_dict["mutation rate"] = Parameter(
-        "mutation rate", -8, -8, (-9, -7), inferable=False, log=True
+        "mutation rate", 1.25e-8, 1e-9, (1e-10, 1e-7), inferable=False
     )
     params_dict["effective size"] = Parameter(
-        "effective size", 4, 4, (3, 5), inferable=True, log=True
+        "effective size", 10000, 14000, (5000, 15000), inferable=True
     )
-
-    """
-    params_dict["recombination rate"] = Parameter(
-        "recombination rate", 1.25e-9, 1e-10, (1e-11, 1e-7), inferable=True)
-    params_dict["mutation rate"] = Parameter(
-            "mutation rate", 1.25e-8, 1e-9, (1e-9, 1e-7), inferable=False)
-    params_dict["effective size"] = Parameter(
-            "effective size", 10000, 14000, (5000, 15000), inferable=True)
-    """
 
     genob = Genobuilder(
         source=args.source,
@@ -805,8 +783,7 @@ if __name__ == "__main__":
         maf_thresh=args.maf_threshold,
         fixed_dim=args.fixed_dimension,
         seed=args.seed,
-        scale=False,
-        parallelism=args.parallelism
+        parallelism=args.parallelism,
     )
 
     if len(params_dict.keys()) >= 1:
@@ -838,4 +815,4 @@ if __name__ == "__main__":
 
 
 # Command example:
-# python genobuilder.py download_genmats -n 1000 -s msprime -nh 99 -l 1e6 -maf 0.05 -f 128 -se 2020 -o test
+# python genobuilder.py download_genmats -n 1000 -s msprime -nh 99 -l 1e6 -maf 0.05 -f 128 -se 2020 -o test -p 16
