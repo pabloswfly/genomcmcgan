@@ -30,12 +30,11 @@ def do_sim(args):
     if proposals:
         Ne, mu, r = [
             params[p].prop(i) if params[p].inferable else params[p].val
-            for p in ("effective size", "mutation rate", "recombination rate")
+            for p in ("Ne", "mu", "r")
         ]
     else:
         Ne, mu, r = [
-            params[p].rand() if randomize else params[p].val
-            for p in ("effective size", "mutation rate", "recombination rate")
+            params[p].rand() if randomize else params[p].val for p in ("Ne", "mu", "r")
         ]
 
     ts = msprime.simulate(
@@ -766,15 +765,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     params_dict = OrderedDict()
 
-    params_dict["recombination rate"] = Parameter(
-        "recombination rate", 1.25e-9, 1e-10, (1e-11, 1e-7), inferable=False
-    )
-    params_dict["mutation rate"] = Parameter(
-        "mutation rate", 1.25e-8, 1e-9, (1e-10, 1e-7), inferable=False
-    )
-    params_dict["effective size"] = Parameter(
-        "effective size", 10000, 14000, (5000, 15000), inferable=True
-    )
+    params_dict["r"] = Parameter("r", 1.25e-9, 1e-10, (1e-11, 1e-7), inferable=True)
+    params_dict["mu"] = Parameter("mu", 1.25e-8, 1e-9, (1e-10, 1e-7), inferable=False)
+    params_dict["Ne"] = Parameter("Ne", 10000, 14000, (5000, 15000), inferable=True)
 
     genob = Genobuilder(
         source=args.source,
