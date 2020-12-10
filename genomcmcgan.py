@@ -119,7 +119,7 @@ def run_genomcmcgan(
         num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1
     )
 
-    max_num_iters = 5
+    max_num_iters = 4
     convergence = False
     it = 1
 
@@ -128,12 +128,13 @@ def run_genomcmcgan(
         print("Starting the MCMC sampling chain")
         start_t = time.time()
 
-        sample_mean, sample_stddev, is_accepted, log_acc_rate = mcmcgan.run_chain()
-        # print(f"Is accepted: {is_accepted}, acc_rate: {log_acc_rate}")
+        is_accepted, log_acc_rate = mcmcgan.run_chain()
+        print(f"Is accepted: {is_accepted}, acc_rate: {log_acc_rate}")
 
         # Draw traceplot and histogram of collected samples
         mcmcgan.traceplot_samples(inferable_params, it)
         mcmcgan.hist_samples(inferable_params, it)
+        mcmcgan.jointplot(it)
 
         for i, p in enumerate(inferable_params):
             p.proposals = mcmcgan.samples[:, i].numpy()
@@ -142,9 +143,9 @@ def run_genomcmcgan(
         stds = np.std(mcmcgan.samples, axis=0)
         for j, p in enumerate(inferable_params):
             print(f"{p.name} samples with mean {means[j]} and std {stds[j]}")
-        mcmcgan.initial_guess = tf.constant(means)
-        # mcmcgan.step_sizes = tf.constant(stds)
-        mcmcgan.step_sizes = tf.constant(np.sqrt(stds))
+        initial_guesses = tf.constant(means)
+        step_sizes = tf.constant(stds)
+        # mcmcgan.step_sizes = tf.constant(np.sqrt(stds))
         mcmcgan.setup_mcmc(
             num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1
         )
@@ -173,6 +174,9 @@ def run_genomcmcgan(
 
         t = time.time() - start_t
         print(f"A single iteration of the MCMC-GAN took {t} seconds")
+
+    print(f"The estimates obtained after {it} iterations are:")
+    print(means)
 
 
 if __name__ == "__main__":

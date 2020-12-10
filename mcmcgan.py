@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -209,7 +210,7 @@ class MCMCGAN:
 
         self.discriminator = cnn
 
-    def D(self, x, num_reps=32):
+    def D(self, x, num_reps=64):
         """
         Simulate with parameters `x`, then classify the simulations with the
         discriminator. Returns the average over `num_replicates` simulations.
@@ -224,8 +225,6 @@ class MCMCGAN:
     # Where `D(x)` is the average discriminator output from n independent
     # simulations (which are simulated with parameters `x`).
     def _unnormalized_log_prob(self, x):
-
-        import copy
 
         proposals = copy.deepcopy(self.genob.params)
 
@@ -279,7 +278,7 @@ class MCMCGAN:
         elif self.kernel_name == "hmc":
             mcmc = tfp.mcmc.HamiltonianMonteCarlo(
                 target_log_prob_fn=self.unnormalized_log_prob,
-                num_leapfrog_steps=6,
+                num_leapfrog_steps=5,
                 step_size=self.step_sizes,
             )
 
@@ -289,6 +288,7 @@ class MCMCGAN:
                 target_accept_prob=0.70,
             )
 
+        # Good NUTS tutorial: https://adamhaber.github.io/post/nuts/
         elif self.kernel_name == "nuts":
             mcmc = tfp.mcmc.NoUTurnSampler(
                 target_log_prob_fn=self.unnormalized_log_prob,
@@ -351,10 +351,8 @@ class MCMCGAN:
 
         self.samples = samples
         self.acceptance = is_accepted
-        sample_mean = tf.reduce_mean(samples)
-        sample_stddev = tf.math.reduce_std(samples)
 
-        return sample_mean, sample_stddev, is_accepted, log_acc_r
+        return is_accepted, log_acc_r
 
     def hist_samples(self, params, it, bins=10):
 
@@ -372,7 +370,6 @@ class MCMCGAN:
                 f"./results/mcmcgan_{self.kernel_name}_histogram_it{it}"
                 f"_{p.name}.png"
             )
-            # plt.show()
             plt.clf()
 
     def traceplot_samples(self, params, it):
@@ -401,5 +398,15 @@ class MCMCGAN:
                 f"./results/mcmcgan_{self.kernel_name}_traceplot_it{it}"
                 f"_{p.name}.png"
             )
-            # plt.show()
             plt.clf()
+
+    def jointplot(self, it):
+
+        g = sns.jointplot(self.samples[:, 0], self.samples[:, 1], kind="kde")
+        g.plot_joint(sns.kdeplot, color="b", zorder=0, levels=6)
+        g.plot_marginals(sns.rugplot, color="r", height=-0.15, clip_on=False)
+        plt.xlabel("P1")
+        plt.ylabel("P2")
+        plt.title(f"Jointplot at iteration {it}")
+        plt.savefig(f"./results/jointplot_{it}.png")
+        plt.clf()
