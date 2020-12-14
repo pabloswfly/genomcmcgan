@@ -80,10 +80,10 @@ def onepop_migration(args):
 
     genob, params, randomize, i, proposals, seed = args
     necessary_params = ["mu", "r", "T1", "N1", "N2", "mig"]
-    assert sorted(necessary_params) == sorted(
-        list(params.keys())
-    ), "Invalid combination of parameters. Needed: mu | r | T1 | N1 | N2 | mig \n" \
+    assert sorted(necessary_params) == sorted(list(params.keys())), (
+        "Invalid combination of parameters. Needed: mu | r | T1 | N1 | N2 | mig \n"
         f"Obtained: {list(params.keys())}"
+    )
 
     if proposals:
         mu, r, T1, N1, N2, mig = [
@@ -97,13 +97,14 @@ def onepop_migration(args):
 
     population_configurations = [
         msprime.PopulationConfiguration(sample_size=genob.num_samples, initial_size=N1),
-        msprime.PopulationConfiguration(sample_size=0, initial_size=N2)]
+        msprime.PopulationConfiguration(sample_size=0, initial_size=N2),
+    ]
 
     # migration from pop 1 into pop 0 (back in time)
     mig_event = msprime.MassMigration(time=T1, source=1, destination=0, proportion=mig)
 
     ts = msprime.simulate(
-		population_configurations=population_configurations,
+        population_configurations=population_configurations,
         demographic_events=[mig_event],
         length=genob.seq_len,
         mutation_rate=mu,
