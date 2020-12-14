@@ -1,7 +1,6 @@
 import os
 from collections import OrderedDict
 import concurrent.futures
-import msprime
 import pickle
 import argparse
 import stdpopsim
@@ -11,6 +10,7 @@ import bisect
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
+import demography as dm
 from parameter import Parameter
 
 _ex = None
@@ -24,27 +24,11 @@ def executor(p):
 
 
 def do_sim(args):
-    genob, params, randomize, i, proposals, seed = args
+
+    seed = args[5]
+    genob = args[0]
     rng = random.Random(seed)
-
-    if proposals:
-        Ne, mu, r = [
-            params[p].prop(i) if params[p].inferable else params[p].val
-            for p in ("Ne", "mu", "r")
-        ]
-    else:
-        Ne, mu, r = [
-            params[p].rand() if randomize else params[p].val for p in ("Ne", "mu", "r")
-        ]
-
-    ts = msprime.simulate(
-        sample_size=genob.num_samples,
-        Ne=Ne,
-        length=genob.seq_len,
-        mutation_rate=mu,
-        recombination_rate=r,
-        random_seed=seed,
-    )
+    ts = dm.onepop_exp(args)
 
     return genob._resize_from_ts(ts, rng)
 
@@ -765,9 +749,24 @@ if __name__ == "__main__":
     args = parser.parse_args()
     params_dict = OrderedDict()
 
-    params_dict["r"] = Parameter("r", 1.25e-9, 1e-10, (1e-11, 1e-7), inferable=True)
-    params_dict["mu"] = Parameter("mu", 1.25e-8, 1e-9, (1e-10, 1e-7), inferable=False)
-    params_dict["Ne"] = Parameter("Ne", 10000, 14000, (5000, 15000), inferable=True)
+    params_dict["r"] = Parameter("r", 2e-8, 1e-10, (1e-11, 1e-7), inferable=False)
+    params_dict["mu"] = Parameter("mu", 1.29e-8, 1e-9, (1e-10, 1e-7), inferable=False)
+    # params_dict["Ne"] = Parameter("Ne", 10000, 14000, (5000, 15000), inferable=True)
+
+    # For onepop_exp model:
+    params_dict["T1"] = Parameter("T1", 3000, 4000, (1500, 5000), inferable=True)
+    params_dict["N1"] = Parameter("N1", 10000, 20000, (1000, 30000), inferable=True)
+    params_dict["T2"] = Parameter("T2", 500, 1000, (100, 1500), inferable=False)
+    params_dict["N2"] = Parameter("N2", 5000, 20000, (1000, 20000), inferable=True)
+    params_dict["growth"] = Parameter("growth", 0.01, 0.02, (0, 0.05), inferable=True)
+
+    # For onepop_migration model:
+    """
+    params_dict["T1"] = Parameter("T1", 1000, 4000, (500, 5000), inferable=False)
+    params_dict["N1"] = Parameter("N1", 5000, 18000, (1000, 20000), inferable=False)
+    params_dict["N2"] = Parameter("N2", 8000, 15000, (1000, 20000), inferable=False)
+    params_dict["mig"] = Parameter("mig", 0.9, 0.2, (0, 0.3), inferable=True)
+    """
 
     genob = Genobuilder(
         source=args.source,
