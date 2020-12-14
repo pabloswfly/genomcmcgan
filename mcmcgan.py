@@ -1,4 +1,5 @@
 import copy
+import concurrent.futures
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -11,6 +12,252 @@ from symmetric import Symmetric
 from training_utils import DMonitor, DMonitor2, ConfusionMatrix
 
 
+def _discriminator_build(args):
+    model_filename, model, in_shape = args
+
+    """Build different Convnet models with permutation variance property"""
+
+    cnn = keras.models.Sequential(name="discriminator")
+
+    if model == 17:
+        """Model 16 with no BN and with Weight Normalization.
+        Paper: https://arxiv.org/pdf/1704.03971.pdf"""
+
+        cnn.add(keras.layers.BatchNormalization())
+        # None in input_shape for dimensions with variable size.
+        cnn.add(
+            tfa.layers.WeightNormalization(
+                keras.layers.Conv2D(
+                    filters=8,
+                    kernel_size=(1, 5),
+                    padding="same",
+                    strides=(1, 2),
+                    input_shape=in_shape,
+                )
+            )
+        )
+        cnn.add(keras.layers.LeakyReLU(0.3))
+
+        cnn.add(Symmetric("max", axis=1))
+
+        cnn.add(
+            tfa.layers.WeightNormalization(
+                keras.layers.Conv2D(
+                    filters=16, kernel_size=(1, 5), padding="same", strides=(1, 2)
+                )
+            )
+        )
+        cnn.add(keras.layers.LeakyReLU(0.3))
+        cnn.add(keras.layers.Dropout(0.5))
+
+        cnn.add(Symmetric("max", axis=2))
+
+    elif model == 18:
+
+        cnn.add(keras.layers.BatchNormalization(name="BatchNorm_1"))
+        # None in input_shape for dimensions with variable size.
+        cnn.add(
+            tfa.layers.WeightNormalization(
+                keras.layers.Conv2D(
+                    filters=32,
+                    kernel_size=(1, 5),
+                    padding="same",
+                    strides=(1, 2),
+                    input_shape=in_shape,
+                ),
+                name="Conv2D_WeightNorm_1",
+            )
+        )
+        cnn.add(keras.layers.LeakyReLU(0.3, name="LeakyReLU_1"))
+        cnn.add(keras.layers.BatchNormalization(name="BatchNorm_2"))
+
+        cnn.add(Symmetric("sum", axis=1, name="Symmetric_1"))
+
+        cnn.add(
+            tfa.layers.WeightNormalization(
+                keras.layers.Conv2D(
+                    filters=64, kernel_size=(1, 5), padding="same", strides=(1, 2)
+                ),
+                name="Conv2D_WeightNorm_2",
+            )
+        )
+        cnn.add(keras.layers.LeakyReLU(0.3, name="LeakyReLU_2"))
+        cnn.add(keras.layers.BatchNormalization(name="BatchNorm_3"))
+        cnn.add(keras.layers.Dropout(0.5, name="Dropout"))
+
+        cnn.add(Symmetric("sum", axis=2, name="Symmetric_2"))
+
+    elif model == 19:
+
+        # None in input_shape for dimensions with variable size.
+        cnn.add(
+            keras.layers.Conv2D(
+                filters=32,
+                kernel_size=(1, 5),
+                padding="same",
+                strides=(1, 2),
+                input_shape=in_shape,
+            )
+        )
+        cnn.add(keras.layers.LeakyReLU(0.3))
+        cnn.add(keras.layers.BatchNormalization())
+
+        cnn.add(Symmetric("sum", axis=1))
+
+        cnn.add(
+            keras.layers.Conv2D(
+                filters=64, kernel_size=(1, 5), padding="same", strides=(1, 2)
+            )
+        )
+        cnn.add(keras.layers.LeakyReLU(0.3))
+        cnn.add(keras.layers.BatchNormalization())
+        cnn.add(keras.layers.Dropout(0.5))
+
+        cnn.add(Symmetric("sum", axis=2))
+
+    elif model == 20:
+
+        # None in input_shape for dimensions with variable size.
+        cnn.add(
+            tfa.layers.WeightNormalization(
+                keras.layers.Conv2D(
+                    filters=32,
+                    kernel_size=(1, 5),
+                    padding="same",
+                    strides=(1, 2),
+                    input_shape=in_shape,
+                )
+            )
+        )
+        cnn.add(keras.layers.LeakyReLU(0.3))
+        cnn.add(keras.layers.BatchNormalization())
+
+        cnn.add(Symmetric("sum", axis=1))
+
+        cnn.add(
+            tfa.layers.WeightNormalization(
+                keras.layers.Conv2D(
+                    filters=64, kernel_size=(1, 5), padding="same", strides=(1, 2)
+                )
+            )
+        )
+        cnn.add(keras.layers.LeakyReLU(0.3))
+        cnn.add(keras.layers.BatchNormalization())
+        cnn.add(keras.layers.Dropout(0.5))
+
+        cnn.add(Symmetric("sum", axis=2))
+
+    elif model == "pop_gen_cnn":
+        """Convolutional neural network used in
+        https://github.com/flag0010/pop_gen_cnn/"""
+
+        cnn.add(keras.layers.Conv2D(128, 2, activation="relu"))
+        cnn.add(keras.layers.BatchNormalization())
+        cnn.add(keras.layers.MaxPool2D(pool_size=(2, 2)))
+        cnn.add(keras.layers.Conv2D(128, 2, activation="relu"))
+        cnn.add(keras.layers.BatchNormalization())
+        cnn.add(keras.layers.MaxPool2D(pool_size=(2, 2)))
+        cnn.add(keras.layers.Conv2D(128, 2, activation="relu"))
+        cnn.add(keras.layers.BatchNormalization())
+        cnn.add(keras.layers.MaxPool2D(pool_size=(2, 2)))
+        cnn.add(keras.layers.Conv2D(128, 2, activation="relu"))
+        cnn.add(keras.layers.BatchNormalization())
+        cnn.add(keras.layers.MaxPool2D(pool_size=(2, 2)))
+        cnn.add(keras.layers.Flatten())
+        cnn.add(
+            keras.layers.Dense(256, activation="relu", kernel_initializer="normal")
+        )
+        cnn.add(keras.layers.Dense(1, activation="sigmoid"))
+
+        self.discriminator = cnn
+        return
+
+    elif model == "keras":
+        """Discriminator used in the GAN implementation example in keras"""
+
+        cnn.add(
+            keras.layers.Conv2D(
+                64, (1, 7), strides=(1, 2), padding="same", input_shape=in_shape
+            )
+        )
+        cnn.add(keras.layers.LeakyReLU(alpha=0.2))
+        cnn.add(keras.layers.Conv2D(128, (1, 7), strides=(1, 2), padding="same"))
+        cnn.add(keras.layers.LeakyReLU(alpha=0.2))
+        cnn.add(keras.layers.GlobalMaxPooling2D())
+
+    cnn.add(keras.layers.Flatten(name="Flatten"))
+    cnn.add(keras.layers.Dense(128, activation="relu", name="Dense"))
+    cnn.add(keras.layers.Dense(1, activation="sigmoid", name="Output_dense"))
+
+    cnn.build(input_shape=(None, *in_shape))
+    cnn.save(model_filename)
+
+
+def _discriminator_load(model_filename):
+    return keras.models.load_model(
+        model_filename,
+        custom_objects={
+            "Symmetric": Symmetric,
+            "Addons>WeightNormalization": tfa.layers.WeightNormalization,
+        },
+    )
+
+
+def _discriminator_fit(args):
+    model_filename, xtrain, xval, ytrain, yval, epochs = args
+    cnn = _discriminator_load(model_filename)
+
+    # Prepare the optimizer and loss function
+    loss_fn = keras.losses.BinaryCrossentropy(from_logits=True)
+    opt = keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5)
+    cnn.compile(optimizer=opt, loss=loss_fn, metrics=["accuracy"])
+
+    # Prepare the training and validation datasets
+    batch_size = 32
+    prefetch = 2
+    train_data = tf.data.Dataset.from_tensor_slices(
+        (xtrain.astype("float32"), ytrain)
+    )
+    train_data = train_data.cache().batch(batch_size).prefetch(prefetch)
+
+    val_data = tf.data.Dataset.from_tensor_slices((xval.astype("float32"), yval))
+    val_data = val_data.cache().batch(batch_size).prefetch(prefetch)
+
+    training = cnn.fit(
+        train_data, None, batch_size, epochs, validation_data=val_data, shuffle=True
+    )
+
+    # Save the keras model
+    cnn.summary(line_length=75, positions=[0.58, 0.86, 0.99, 0.1])
+    cnn.save(model_filename)
+
+
+def _discriminator_predict(args):
+    model_filename, inputs = args
+    cnn = _discriminator_load(model_filename)
+    return cnn.predict(inputs)
+
+
+class Discriminator:
+
+    def __init__(self, model_filename):
+        self.model_filename = model_filename
+
+    def build(self, model, in_shape):
+        with concurrent.futures.ProcessPoolExecutor(max_workers=1) as ex:
+            next(ex.map(_discriminator_build, [(self.model_filename, model, in_shape)]))
+
+    def fit(self, xtrain, xval, ytrain, yval, epochs):
+        args = (self.model_filename, xtrain, xval, ytrain, yval, epochs)
+        with concurrent.futures.ProcessPoolExecutor(max_workers=1) as ex:
+            next(ex.map(_discriminator_fit, [args]))
+
+    def predict(self, inputs):
+        with concurrent.futures.ProcessPoolExecutor(max_workers=1) as ex:
+            preds = next(ex.map(_discriminator_predict, [(self.model_filename, inputs)]))
+        return preds
+
+
 class MCMCGAN:
     """Class for building the coupled MCMC-Discriminator architecture"""
 
@@ -20,195 +267,6 @@ class MCMCGAN:
         self.discriminator = discriminator
         self.kernel_name = kernel_name
         self.seed = seed
-
-    def set_discriminator(self, cnn):
-        self.discriminator = cnn
-
-    def load_discriminator(self, file):
-        self.discriminator = keras.models.load_model(
-            file,
-            custom_objects={
-                "Symmetric": Symmetric,
-                "Addons>WeightNormalization": tfa.layers.WeightNormalization,
-            },
-        )
-
-    def build_discriminator(self, model, in_shape):
-        """Build different Convnet models with permutation variance property"""
-
-        cnn = keras.models.Sequential(name="discriminator")
-
-        if model == 17:
-            """Model 16 with no BN and with Weight Normalization.
-            Paper: https://arxiv.org/pdf/1704.03971.pdf"""
-
-            cnn.add(keras.layers.BatchNormalization())
-            # None in input_shape for dimensions with variable size.
-            cnn.add(
-                tfa.layers.WeightNormalization(
-                    keras.layers.Conv2D(
-                        filters=8,
-                        kernel_size=(1, 5),
-                        padding="same",
-                        strides=(1, 2),
-                        input_shape=in_shape,
-                    )
-                )
-            )
-            cnn.add(keras.layers.LeakyReLU(0.3))
-
-            cnn.add(Symmetric("max", axis=1))
-
-            cnn.add(
-                tfa.layers.WeightNormalization(
-                    keras.layers.Conv2D(
-                        filters=16, kernel_size=(1, 5), padding="same", strides=(1, 2)
-                    )
-                )
-            )
-            cnn.add(keras.layers.LeakyReLU(0.3))
-            cnn.add(keras.layers.Dropout(0.5))
-
-            cnn.add(Symmetric("max", axis=2))
-
-        elif model == 18:
-
-            cnn.add(keras.layers.BatchNormalization(name="BatchNorm_1"))
-            # None in input_shape for dimensions with variable size.
-            cnn.add(
-                tfa.layers.WeightNormalization(
-                    keras.layers.Conv2D(
-                        filters=32,
-                        kernel_size=(1, 5),
-                        padding="same",
-                        strides=(1, 2),
-                        input_shape=in_shape,
-                    ),
-                    name="Conv2D_WeightNorm_1",
-                )
-            )
-            cnn.add(keras.layers.LeakyReLU(0.3, name="LeakyReLU_1"))
-            cnn.add(keras.layers.BatchNormalization(name="BatchNorm_2"))
-
-            cnn.add(Symmetric("sum", axis=1, name="Symmetric_1"))
-
-            cnn.add(
-                tfa.layers.WeightNormalization(
-                    keras.layers.Conv2D(
-                        filters=64, kernel_size=(1, 5), padding="same", strides=(1, 2)
-                    ),
-                    name="Conv2D_WeightNorm_2",
-                )
-            )
-            cnn.add(keras.layers.LeakyReLU(0.3, name="LeakyReLU_2"))
-            cnn.add(keras.layers.BatchNormalization(name="BatchNorm_3"))
-            cnn.add(keras.layers.Dropout(0.5, name="Dropout"))
-
-            cnn.add(Symmetric("sum", axis=2, name="Symmetric_2"))
-
-        elif model == 19:
-
-            # None in input_shape for dimensions with variable size.
-            cnn.add(
-                keras.layers.Conv2D(
-                    filters=32,
-                    kernel_size=(1, 5),
-                    padding="same",
-                    strides=(1, 2),
-                    input_shape=in_shape,
-                )
-            )
-            cnn.add(keras.layers.LeakyReLU(0.3))
-            cnn.add(keras.layers.BatchNormalization())
-
-            cnn.add(Symmetric("sum", axis=1))
-
-            cnn.add(
-                keras.layers.Conv2D(
-                    filters=64, kernel_size=(1, 5), padding="same", strides=(1, 2)
-                )
-            )
-            cnn.add(keras.layers.LeakyReLU(0.3))
-            cnn.add(keras.layers.BatchNormalization())
-            cnn.add(keras.layers.Dropout(0.5))
-
-            cnn.add(Symmetric("sum", axis=2))
-
-        elif model == 20:
-
-            # None in input_shape for dimensions with variable size.
-            cnn.add(
-                tfa.layers.WeightNormalization(
-                    keras.layers.Conv2D(
-                        filters=32,
-                        kernel_size=(1, 5),
-                        padding="same",
-                        strides=(1, 2),
-                        input_shape=in_shape,
-                    )
-                )
-            )
-            cnn.add(keras.layers.LeakyReLU(0.3))
-            cnn.add(keras.layers.BatchNormalization())
-
-            cnn.add(Symmetric("sum", axis=1))
-
-            cnn.add(
-                tfa.layers.WeightNormalization(
-                    keras.layers.Conv2D(
-                        filters=64, kernel_size=(1, 5), padding="same", strides=(1, 2)
-                    )
-                )
-            )
-            cnn.add(keras.layers.LeakyReLU(0.3))
-            cnn.add(keras.layers.BatchNormalization())
-            cnn.add(keras.layers.Dropout(0.5))
-
-            cnn.add(Symmetric("sum", axis=2))
-
-        elif model == "pop_gen_cnn":
-            """Convolutional neural network used in
-            https://github.com/flag0010/pop_gen_cnn/"""
-
-            cnn.add(keras.layers.Conv2D(128, 2, activation="relu"))
-            cnn.add(keras.layers.BatchNormalization())
-            cnn.add(keras.layers.MaxPool2D(pool_size=(2, 2)))
-            cnn.add(keras.layers.Conv2D(128, 2, activation="relu"))
-            cnn.add(keras.layers.BatchNormalization())
-            cnn.add(keras.layers.MaxPool2D(pool_size=(2, 2)))
-            cnn.add(keras.layers.Conv2D(128, 2, activation="relu"))
-            cnn.add(keras.layers.BatchNormalization())
-            cnn.add(keras.layers.MaxPool2D(pool_size=(2, 2)))
-            cnn.add(keras.layers.Conv2D(128, 2, activation="relu"))
-            cnn.add(keras.layers.BatchNormalization())
-            cnn.add(keras.layers.MaxPool2D(pool_size=(2, 2)))
-            cnn.add(keras.layers.Flatten())
-            cnn.add(
-                keras.layers.Dense(256, activation="relu", kernel_initializer="normal")
-            )
-            cnn.add(keras.layers.Dense(1, activation="sigmoid"))
-
-            self.discriminator = cnn
-            return
-
-        elif model == "keras":
-            """Discriminator used in the GAN implementation example in keras"""
-
-            cnn.add(
-                keras.layers.Conv2D(
-                    64, (1, 7), strides=(1, 2), padding="same", input_shape=in_shape
-                )
-            )
-            cnn.add(keras.layers.LeakyReLU(alpha=0.2))
-            cnn.add(keras.layers.Conv2D(128, (1, 7), strides=(1, 2), padding="same"))
-            cnn.add(keras.layers.LeakyReLU(alpha=0.2))
-            cnn.add(keras.layers.GlobalMaxPooling2D())
-
-        cnn.add(keras.layers.Flatten(name="Flatten"))
-        cnn.add(keras.layers.Dense(128, activation="relu", name="Dense"))
-        cnn.add(keras.layers.Dense(1, activation="sigmoid", name="Output_dense"))
-
-        self.discriminator = cnn
 
     def D(self, x, num_reps=64):
         """

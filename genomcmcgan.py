@@ -14,7 +14,7 @@ import argparse
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
-from mcmcgan import MCMCGAN
+from mcmcgan import MCMCGAN, Discriminator
 from genobuilder import Genobuilder
 
 gpus = tf.config.experimental.list_physical_devices("GPU")
@@ -50,19 +50,12 @@ def run_genomcmcgan(
 
     genob.parallelism = parallelism
 
+    # Generate the training and validation datasets
     if data_path:
         with open(data_path, "rb") as obj:
             xtrain, ytrain, xval, yval = pickle.load(obj)
     else:
         xtrain, xval, ytrain, yval = genob.generate_data(num_reps=1000)
-
-    # Prepare the training and validation datasets
-    batch_size = 32
-    train_data = tf.data.Dataset.from_tensor_slices((xtrain.astype("float32"), ytrain))
-    train_data = train_data.cache().batch(batch_size).prefetch(2)
-
-    val_data = tf.data.Dataset.from_tensor_slices((xval.astype("float32"), yval))
-    val_data = val_data.cache().batch(batch_size).prefetch(2)
 
     # Prepare a list of genotype matrices from a range of parameter values
     # from msprime for testing
@@ -83,26 +76,15 @@ def run_genomcmcgan(
 
     # Load a given discriminator or build one of the implemented ones
     if discriminator_model:
-        mcmcgan.load_discriminator(discriminator_model)
+        mcmcgan.discriminator = Discriminator(discriminator_model)
     else:
         model = 18
-        mcmcgan.build_discriminator(
+        mcmcgan.discriminator = Discriminator(f"D{model}_trained_{epochs}e.h5")
+        mcmcgan.discriminator.build(
             model, in_shape=(genob.num_samples, genob.fixed_dim, 1)
         )
 
-    # Prepare the optimizer and loss function
-    loss_fn = keras.losses.BinaryCrossentropy(from_logits=True)
-    opt = keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5)
-    mcmcgan.discriminator.compile(optimizer=opt, loss=loss_fn, metrics=["accuracy"])
-
-    training = mcmcgan.discriminator.fit(
-        train_data, None, batch_size, epochs, validation_data=val_data, shuffle=True
-    )
-
-    # Save the keras model
-    mcmcgan.discriminator.summary(line_length=75, positions=[0.58, 0.86, 0.99, 0.1])
-    filename = f"D{model}_trained_{epochs}e.h5"
-    mcmcgan.discriminator.save(filename)
+    mcmcgan.discriminator.fit(xtrain, xval, ytrain, yval, epochs)
 
     # Initial guess must always be a float, otherwise with an int there are errors
     inferable_params = []
@@ -113,7 +95,6 @@ def run_genomcmcgan(
 
     initial_guesses = tf.constant([float(p.initial_guess) for p in inferable_params])
     step_sizes = tf.constant([float(p.initial_guess * 0.1) for p in inferable_params])
-    mcmcgan.discriminator.run_eagerly = True
     tf.config.run_functions_eagerly(True)
     mcmcgan.setup_mcmc(
         num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1
@@ -150,22 +131,7 @@ def run_genomcmcgan(
             num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1
         )
 
-        # Prepare the training and validation datasets
-        # xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(n_reps)
-        xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(
-            num_mcmc_samples, proposals=True
-        )
-        train_data = tf.data.Dataset.from_tensor_slices(
-            (xtrain.astype("float32"), ytrain)
-        )
-        train_data = train_data.cache().batch(batch_size).prefetch(16)
-
-        val_data = tf.data.Dataset.from_tensor_slices((xval.astype("float32"), yval))
-        val_data = val_data.cache().batch(batch_size).prefetch(16)
-
-        mcmcgan.discriminator.fit(
-            train_data, None, batch_size, epochs, val_data, shuffle=True
-        )
+        mcmcgan.discriminator.fit(xtrain, xval, ytrain, yval, epochs)
 
         it += 1
         if training.history["accuracy"][-1] < 0.55:
