@@ -69,12 +69,7 @@ def run_genomcmcgan(
     """
     xtest = genob.generate_fakedata(num_reps=1000)
     test_data = tf.data.Dataset.from_tensor_slices((xtest.astype("float32")))
-    test_data = (
-          test_data
-          .cache()
-          .batch(batch_size)
-          .prefetch(2)
-    )
+    test_data = test_data.cache().batch(batch_size).prefetch(2)
     """
 
     print("Data simulation finished")
@@ -125,7 +120,7 @@ def run_genomcmcgan(
 
     while not convergence and max_num_iters != it:
 
-        print("Starting the MCMC sampling chain")
+        print(f"Starting the MCMC sampling chain for iteration {it}")
         start_t = time.time()
 
         is_accepted, log_acc_rate = mcmcgan.run_chain()
@@ -134,7 +129,9 @@ def run_genomcmcgan(
         # Draw traceplot and histogram of collected samples
         mcmcgan.traceplot_samples(inferable_params, it)
         mcmcgan.hist_samples(inferable_params, it)
-        mcmcgan.jointplot(it)
+        print(mcmcgan.samples.shape)
+        if mcmcgan.samples.shape[1] == 2:
+            mcmcgan.jointplot_samples(inferable_params, it)
 
         for i, p in enumerate(inferable_params):
             p.proposals = mcmcgan.samples[:, i].numpy()
@@ -176,7 +173,7 @@ def run_genomcmcgan(
         print(f"A single iteration of the MCMC-GAN took {t} seconds")
 
     print(f"The estimates obtained after {it} iterations are:")
-    print(means)
+    print(float(means))
 
 
 if __name__ == "__main__":
