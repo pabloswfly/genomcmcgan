@@ -219,7 +219,9 @@ class MCMCGAN:
         self.genob.num_reps = num_reps
 
         return tf.reduce_mean(
-            self.discriminator.predict(self.genob.simulate_msprime(x).astype("float32"))
+            self.discriminator.predict_on_batch(
+                self.genob.simulate_msprime(x).astype("float32")
+            )
         )
 
     # Where `D(x)` is the average discriminator output from n independent
@@ -300,7 +302,7 @@ class MCMCGAN:
             self.mcmc_kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
                 mcmc,
                 num_adaptation_steps=int(self.num_burnin_steps * 0.8),
-                target_accept_prob=0.75,
+                target_accept_prob=0.3,
                 step_size_setter_fn=lambda pkr, new_step_size: pkr._replace(
                     step_size=new_step_size
                 ),
@@ -356,7 +358,7 @@ class MCMCGAN:
 
     def hist_samples(self, params, it, bins=10):
 
-        colors = ["b", "g", "r"]
+        colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
         for i, p in enumerate(params):
             sns.distplot(self.samples[:, i], color=colors[i])
             ymax = plt.ylim()[1]
@@ -375,8 +377,10 @@ class MCMCGAN:
     def traceplot_samples(self, params, it):
 
         # EXPAND COLORS FOR MORE PARAMETERS
-        colors = ["b", "g", "r"]
+        colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
         sns.set_style("darkgrid")
+        print(len(params))
+        print(self.samples.shape)
         for i, p in enumerate(params):
             plt.plot(self.samples[:, i], c=colors[i], alpha=0.3)
             plt.hlines(
@@ -400,13 +404,18 @@ class MCMCGAN:
             )
             plt.clf()
 
-    def jointplot(self, it):
+    def jointplot_samples(self, params, it):
+
+        p1 = list(params.values())[0]
+        p2 = list(params.values())[1]
 
         g = sns.jointplot(self.samples[:, 0], self.samples[:, 1], kind="kde")
         g.plot_joint(sns.kdeplot, color="b", zorder=0, levels=6)
         g.plot_marginals(sns.rugplot, color="r", height=-0.15, clip_on=False)
-        plt.xlabel("P1")
-        plt.ylabel("P2")
+        plt.xlim(p1.bounds)
+        plt.ylim(p2.bounds)
+        plt.xlabel(p1.name)
+        plt.ylabel(p2.name)
         plt.title(f"Jointplot at iteration {it}")
         plt.savefig(f"./results/jointplot_{it}.png")
         plt.clf()
