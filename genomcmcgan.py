@@ -57,21 +57,6 @@ def run_genomcmcgan(
     else:
         xtrain, xval, ytrain, yval = genob.generate_data(num_reps=1000)
 
-    # Prepare a list of genotype matrices from a range of parameter values
-    # from msprime for testing
-    """
-    xtest = genob.generate_fakedata(num_reps=1000)
-    test_data = tf.data.Dataset.from_tensor_slices((xtest.astype("float32")))
-    test_data = (
-          test_data
-          .cache()
-          .batch(batch_size)
-          .prefetch(2)
-    )
-    """
-
-    print("Data simulation finished")
-
     mcmcgan = MCMCGAN(genob, kernel_name, seed)
 
     # Load a given discriminator or build one of the implemented ones
