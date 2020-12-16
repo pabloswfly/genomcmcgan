@@ -4,15 +4,16 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import tensorflow as tf
-from tensorflow import keras
-import tensorflow_probability as tfp
 import tensorflow_addons as tfa
+import littlemcmc as lmc
+from scipy import optimize
 
 from symmetric import Symmetric
 from training_utils import DMonitor, DMonitor2, ConfusionMatrix
 
 
 def _discriminator_build(args):
+    from tensorflow import keras
     model_filename, model, in_shape = args
 
     """Build different Convnet models with permutation variance property"""
@@ -89,6 +90,7 @@ def _discriminator_build(args):
 
     elif model == 19:
 
+        cnn.add(keras.layers.BatchNormalization(name="BatchNorm_1"))
         # None in input_shape for dimensions with variable size.
         cnn.add(
             keras.layers.Conv2D(
@@ -147,44 +149,6 @@ def _discriminator_build(args):
 
         cnn.add(Symmetric("sum", axis=2))
 
-    elif model == "pop_gen_cnn":
-        """Convolutional neural network used in
-        https://github.com/flag0010/pop_gen_cnn/"""
-
-        cnn.add(keras.layers.Conv2D(128, 2, activation="relu"))
-        cnn.add(keras.layers.BatchNormalization())
-        cnn.add(keras.layers.MaxPool2D(pool_size=(2, 2)))
-        cnn.add(keras.layers.Conv2D(128, 2, activation="relu"))
-        cnn.add(keras.layers.BatchNormalization())
-        cnn.add(keras.layers.MaxPool2D(pool_size=(2, 2)))
-        cnn.add(keras.layers.Conv2D(128, 2, activation="relu"))
-        cnn.add(keras.layers.BatchNormalization())
-        cnn.add(keras.layers.MaxPool2D(pool_size=(2, 2)))
-        cnn.add(keras.layers.Conv2D(128, 2, activation="relu"))
-        cnn.add(keras.layers.BatchNormalization())
-        cnn.add(keras.layers.MaxPool2D(pool_size=(2, 2)))
-        cnn.add(keras.layers.Flatten())
-        cnn.add(
-            keras.layers.Dense(256, activation="relu", kernel_initializer="normal")
-        )
-        cnn.add(keras.layers.Dense(1, activation="sigmoid"))
-
-        self.discriminator = cnn
-        return
-
-    elif model == "keras":
-        """Discriminator used in the GAN implementation example in keras"""
-
-        cnn.add(
-            keras.layers.Conv2D(
-                64, (1, 7), strides=(1, 2), padding="same", input_shape=in_shape
-            )
-        )
-        cnn.add(keras.layers.LeakyReLU(alpha=0.2))
-        cnn.add(keras.layers.Conv2D(128, (1, 7), strides=(1, 2), padding="same"))
-        cnn.add(keras.layers.LeakyReLU(alpha=0.2))
-        cnn.add(keras.layers.GlobalMaxPooling2D())
-
     cnn.add(keras.layers.Flatten(name="Flatten"))
     cnn.add(keras.layers.Dense(128, activation="relu", name="Dense"))
     cnn.add(keras.layers.Dense(1, activation="sigmoid", name="Output_dense"))
@@ -194,6 +158,7 @@ def _discriminator_build(args):
 
 
 def _discriminator_load(model_filename):
+    from tensorflow import keras
     return keras.models.load_model(
         model_filename,
         custom_objects={
@@ -204,6 +169,7 @@ def _discriminator_load(model_filename):
 
 
 def _discriminator_fit(args):
+    from tensorflow import keras
     model_filename, xtrain, xval, ytrain, yval, epochs = args
     cnn = _discriminator_load(model_filename)
 
@@ -215,9 +181,7 @@ def _discriminator_fit(args):
     # Prepare the training and validation datasets
     batch_size = 32
     prefetch = 2
-    train_data = tf.data.Dataset.from_tensor_slices(
-        (xtrain.astype("float32"), ytrain)
-    )
+    train_data = tf.data.Dataset.from_tensor_slices((xtrain.astype("float32"), ytrain))
     train_data = train_data.cache().batch(batch_size).prefetch(prefetch)
 
     val_data = tf.data.Dataset.from_tensor_slices((xval.astype("float32"), yval))
@@ -233,13 +197,13 @@ def _discriminator_fit(args):
 
 
 def _discriminator_predict(args):
+    from tensorflow import keras
     model_filename, inputs = args
     cnn = _discriminator_load(model_filename)
     return cnn.predict(inputs)
 
 
 class Discriminator:
-
     def __init__(self, model_filename):
         self.model_filename = model_filename
 
@@ -254,7 +218,10 @@ class Discriminator:
 
     def predict(self, inputs):
         with concurrent.futures.ProcessPoolExecutor(max_workers=1) as ex:
-            preds = next(ex.map(_discriminator_predict, [(self.model_filename, inputs)]))
+            preds = next(
+                ex.map(_discriminator_predict, [(self.model_filename, inputs)])
+            )
+            print("here!")
         return preds
 
 
@@ -276,36 +243,30 @@ class MCMCGAN:
 
         self.genob.num_reps = num_reps
 
-        return tf.reduce_mean(
-            self.discriminator.predict(self.genob.simulate_msprime(x).astype("float32"))
-        )
+        return np.mean(self.discriminator.predict(self.genob.simulate_msprime(x)))
 
     # Where `D(x)` is the average discriminator output from n independent
     # simulations (which are simulated with parameters `x`).
-    def _unnormalized_log_prob(self, x):
+    def log_prob(self, x):
 
         proposals = copy.deepcopy(self.genob.params)
+        print(x)
 
         i = 0
-        for p in proposals:
-            if proposals[p].inferable:
-                if tf.math.less(x[i], proposals[p].bounds[0]) or tf.math.greater(
-                    x[i], proposals[p].bounds[1]
-                ):
-                    # We reject these parameter values by returning probability 0.
-                    return -np.inf
-                else:
-                    proposals[p].val = x[i]
-                    print(f"{proposals[p].name}: {proposals[p].val}")
-
-                i += 1
+        proposals["r"].val = x
+        print(f"{proposals['r'].name}: {proposals['r'].val}")
+        i += 1
 
         score = self.D(proposals)
-        tf.print(score)
-        return tf.math.log(score)
+        print(score)
+        return np.log(score)
 
-    def unnormalized_log_prob(self, x):
-        return tf.py_function(self._unnormalized_log_prob, inp=[x], Tout=tf.float32)
+    def dlog_prob(self, x):
+        eps = np.sqrt(np.finfo(float).eps)
+        return optimize.approx_fprime(x, log_prob, eps)
+
+    def logp_dlogp(self, x):
+        return self.log_prob(x), self.dlog_prob(x)
 
     def setup_mcmc(
         self,
@@ -325,92 +286,50 @@ class MCMCGAN:
         self.samples = None
         tf.print(self.step_sizes)
 
-        if self.kernel_name not in ["random walk", "hmc", "nuts"]:
-            raise NameError("kernel value must be either random walk, hmc or nuts")
-
-        if self.kernel_name == "random walk":
-            self.mcmc_kernel = tfp.mcmc.RandomWalkMetropolis(
-                target_log_prob_fn=self.unnormalized_log_prob
-            )
+        if self.kernel_name not in ["hmc", "nuts"]:
+            raise NameError("kernel value must be either hmc or nuts")
 
         elif self.kernel_name == "hmc":
-            mcmc = tfp.mcmc.HamiltonianMonteCarlo(
-                target_log_prob_fn=self.unnormalized_log_prob,
-                num_leapfrog_steps=5,
-                step_size=self.step_sizes,
-            )
-
-            self.mcmc_kernel = tfp.mcmc.SimpleStepSizeAdaptation(
-                mcmc,
-                num_adaptation_steps=int(self.num_burnin_steps * 0.8),
-                target_accept_prob=0.70,
+            self.mcmc_kernel = lmc.HamiltonianMC(
+                logp_dlogp_func=self.logp_dlogp,
+                model_ndim=1,
+                target_accept=0.75,
+                adapt_step_size=True,
             )
 
         # Good NUTS tutorial: https://adamhaber.github.io/post/nuts/
         elif self.kernel_name == "nuts":
-            mcmc = tfp.mcmc.NoUTurnSampler(
-                target_log_prob_fn=self.unnormalized_log_prob,
-                step_size=self.step_sizes,
-                max_tree_depth=10,
-                max_energy_diff=1000.0,
-            )
-
-            self.mcmc_kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
-                mcmc,
-                num_adaptation_steps=int(self.num_burnin_steps * 0.8),
-                target_accept_prob=0.75,
-                step_size_setter_fn=lambda pkr, new_step_size: pkr._replace(
-                    step_size=new_step_size
-                ),
-                step_size_getter_fn=lambda pkr: pkr.step_size,
-                log_accept_prob_getter_fn=lambda pkr: pkr.log_accept_ratio,
+            self.mcmc_kernel = lmc.NUTS(
+                logp_dlogp_func=self.logp_dlogp,
+                model_ndim=1,
+                target_accept=0.75,
+                adapt_step_size=True,
             )
 
     # Run the chain (with burn-in).
     # autograph=False is recommended by the TFP team. It is related to how
     # control-flow statements are handled.
     # experimental_compile=True for higher efficiency in XLA_GPUs, TPUs, etc...
-    @tf.function(autograph=False, experimental_compile=True)
+    # @tf.function(autograph=False, experimental_compile=True)
     def run_chain(self):
 
-        is_accepted = None
-        log_acc_r = None
-        tf_seed = tf.constant(self.seed)
         print(f"Selected mcmc kernel is {self.kernel_name}")
 
-        if self.kernel_name == "random walk":
-            samples = tfp.mcmc.sample_chain(
-                num_results=self.num_mcmc_results,
-                num_burnin_steps=self.num_burnin_steps,
-                current_state=self.initial_guess,
-                kernel=self.mcmc_kernel,
-                seed=tf_seed,
-                trace_fn=None,
-                steps_between_results=self.steps_between_results,
-            )
+        trace, stats = lmc.sample(
+            logp_dlogp_func=self.logp_dlogp,
+            model_ndim=1,
+            step=self.mcmc_kernel,
+            draws=self.num_mcmc_results,
+            tune=self.num_burnin_steps,
+            start=self.initial_guess,
+            chains=1,
+            progressbar=True,
+            random_seed=self.seed,
+        )
 
-        elif self.kernel_name in ["hmc", "nuts"]:
-            # Run the chain (with burn-in).
-            samples, [is_accepted, log_acc_rat] = tfp.mcmc.sample_chain(
-                num_results=self.num_mcmc_results,
-                num_burnin_steps=self.num_burnin_steps,
-                current_state=self.initial_guess,
-                kernel=self.mcmc_kernel,
-                seed=tf_seed,
-                num_steps_between_results=self.steps_between_results,
-                trace_fn=lambda _, pkr: [
-                    pkr.inner_results.is_accepted,
-                    pkr.inner_results.log_accept_ratio,
-                ],
-            )
+        self.samples = trace
 
-            is_accepted = tf.reduce_mean(tf.cast(is_accepted, dtype=tf.float32))
-            log_acc_r = tf.reduce_mean(tf.cast(log_acc_rat, dtype=tf.float32))
-
-        self.samples = samples
-        self.acceptance = is_accepted
-
-        return is_accepted, log_acc_r
+        return stats
 
     def hist_samples(self, params, it, bins=10):
 

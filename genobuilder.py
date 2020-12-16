@@ -767,7 +767,7 @@ if __name__ == "__main__":
 
     params_dict["r"] = Parameter("r", 1.25e-9, 1e-10, (1e-11, 1e-7), inferable=True)
     params_dict["mu"] = Parameter("mu", 1.25e-8, 1e-9, (1e-10, 1e-7), inferable=False)
-    params_dict["Ne"] = Parameter("Ne", 10000, 14000, (5000, 15000), inferable=True)
+    params_dict["Ne"] = Parameter("Ne", 10000, 14000, (5000, 15000), inferable=False)
 
     genob = Genobuilder(
         source=args.source,

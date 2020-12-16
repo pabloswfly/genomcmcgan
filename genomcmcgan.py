@@ -17,6 +17,7 @@ from tensorflow import keras
 from mcmcgan import MCMCGAN, Discriminator
 from genobuilder import Genobuilder
 
+"""
 gpus = tf.config.experimental.list_physical_devices("GPU")
 if gpus:
     try:
@@ -24,6 +25,7 @@ if gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
     except RuntimeError as e:
         print(e)
+"""
 
 
 def run_genomcmcgan(
@@ -38,7 +40,7 @@ def run_genomcmcgan(
     parallelism,
 ):
 
-    tf.random.set_seed(seed)
+    #tf.random.set_seed(seed)
     np.random.seed(seed)
 
     # Check if folder with results exists, and create it otherwise
@@ -63,12 +65,14 @@ def run_genomcmcgan(
     if discriminator_model:
         mcmcgan.discriminator = Discriminator(discriminator_model)
     else:
-        model = 18
+        model = 19
         mcmcgan.discriminator = Discriminator(f"D{model}_trained_{epochs}e.h5")
         mcmcgan.discriminator.build(
             model, in_shape=(genob.num_samples, genob.fixed_dim, 1)
         )
 
+    mcmcgan.discriminator.run_eagerly = True
+    tf.config.run_functions_eagerly(True)
     mcmcgan.discriminator.fit(xtrain, xval, ytrain, yval, epochs)
 
     # Initial guess must always be a float, otherwise with an int there are errors
@@ -78,9 +82,8 @@ def run_genomcmcgan(
         if p.inferable:
             inferable_params.append(p)
 
-    initial_guesses = tf.constant([float(p.initial_guess) for p in inferable_params])
-    step_sizes = tf.constant([float(p.initial_guess * 0.1) for p in inferable_params])
-    tf.config.run_functions_eagerly(True)
+    initial_guesses = [float(p.initial_guess) for p in inferable_params]
+    step_sizes = [float(p.initial_guess * 0.1) for p in inferable_params]
     mcmcgan.setup_mcmc(
         num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1
     )
@@ -94,8 +97,7 @@ def run_genomcmcgan(
         print("Starting the MCMC sampling chain")
         start_t = time.time()
 
-        is_accepted, log_acc_rate = mcmcgan.run_chain()
-        print(f"Is accepted: {is_accepted}, acc_rate: {log_acc_rate}")
+        stats = mcmcgan.run_chain()
 
         # Draw traceplot and histogram of collected samples
         mcmcgan.traceplot_samples(inferable_params, it)
@@ -103,10 +105,10 @@ def run_genomcmcgan(
         mcmcgan.jointplot(it)
 
         for i, p in enumerate(inferable_params):
-            p.proposals = mcmcgan.samples[:, i].numpy()
+            p.proposals = mcmcgan.samples[:, :, i]
 
-        means = np.mean(mcmcgan.samples, axis=0)
-        stds = np.std(mcmcgan.samples, axis=0)
+        means = np.mean(mcmcgan.samples, axis=2)
+        stds = np.std(mcmcgan.samples, axis=2)
         for j, p in enumerate(inferable_params):
             print(f"{p.name} samples with mean {means[j]} and std {stds[j]}")
         initial_guesses = tf.constant(means)
