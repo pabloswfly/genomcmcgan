@@ -11,7 +11,6 @@ from training_utils import DMonitor, DMonitor2, ConfusionMatrix
 
 
 def _discriminator_build(args):
-    import tensorflow as tf
     import tensorflow_addons as tfa
     from tensorflow import keras
     model_filename, model, in_shape = args
@@ -170,7 +169,6 @@ def _discriminator_load(model_filename):
 
 
 def _discriminator_fit(args):
-    import tensorflow as tf
     from tensorflow import keras
     model_filename, xtrain, xval, ytrain, yval, epochs = args
     cnn = _discriminator_load(model_filename)
@@ -180,17 +178,9 @@ def _discriminator_fit(args):
     opt = keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5)
     cnn.compile(optimizer=opt, loss=loss_fn, metrics=["accuracy"])
 
-    # Prepare the training and validation datasets
     batch_size = 32
-    prefetch = 2
-    train_data = tf.data.Dataset.from_tensor_slices((xtrain.astype("float32"), ytrain))
-    train_data = train_data.cache().batch(batch_size).prefetch(prefetch)
-
-    val_data = tf.data.Dataset.from_tensor_slices((xval.astype("float32"), yval))
-    val_data = val_data.cache().batch(batch_size).prefetch(prefetch)
-
     training = cnn.fit(
-        train_data, None, batch_size, epochs, validation_data=val_data, shuffle=True
+        xtrain, ytrain, batch_size, epochs, validation_data=(xval, yval), shuffle=True
     )
 
     # Save the keras model
@@ -222,7 +212,6 @@ class Discriminator:
             preds = next(
                 ex.map(_discriminator_predict, [(self.model_filename, inputs)])
             )
-            #print("here!")
         return preds
 
 
