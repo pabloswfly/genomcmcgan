@@ -222,7 +222,7 @@ class Discriminator:
             preds = next(
                 ex.map(_discriminator_predict, [(self.model_filename, inputs)])
             )
-            print("here!")
+            #print("here!")
         return preds
 
 
@@ -251,15 +251,19 @@ class MCMCGAN:
     def log_prob(self, x):
 
         proposals = copy.deepcopy(self.genob.params)
-        print(x)
-
         i = 0
-        proposals["r"].val = x
-        print(f"{proposals['r'].name}: {proposals['r'].val}")
-        i += 1
+        for p in proposals:
+            if proposals[p].inferable:
+                if not (proposals[p].bounds[0] < x[i] < proposals[p].bounds[1]):
+                    # We reject these parameter values by returning probability 0.
+                    return -np.inf
+                proposals[p].val = x[i]
+                #print(f"{proposals[p].name}: {proposals[p].val}")
+
+                i += 1
 
         score = self.D(proposals)
-        print(score)
+        #print(score)
         return np.log(score)
 
     def dlog_prob(self, x):

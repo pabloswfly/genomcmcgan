@@ -7,9 +7,14 @@
 # !pip install tskit==0.2.3 zarr msprime stdpopsim tensorflow
 
 # Importing libraries and modules
+import os
+
+if "TF_CPP_MIN_LOG_LEVEL" not in os.environ:
+    # Stop tensorflow from vomitting all over the console!
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
 import pickle
 import time
-import os
 import argparse
 import numpy as np
 from mcmcgan import MCMCGAN, Discriminator
@@ -69,8 +74,8 @@ def run_genomcmcgan(
         if p.inferable:
             inferable_params.append(p)
 
-    initial_guesses = [float(p.initial_guess) for p in inferable_params]
-    step_sizes = [float(p.initial_guess * 0.1) for p in inferable_params]
+    initial_guesses = np.array([float(p.initial_guess) for p in inferable_params])
+    step_sizes = np.array([float(p.initial_guess * 0.1) for p in inferable_params])
     mcmcgan.setup_mcmc(
         num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1
     )
