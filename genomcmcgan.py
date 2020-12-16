@@ -12,20 +12,8 @@ import time
 import os
 import argparse
 import numpy as np
-import tensorflow as tf
-from tensorflow import keras
 from mcmcgan import MCMCGAN, Discriminator
 from genobuilder import Genobuilder
-
-"""
-gpus = tf.config.experimental.list_physical_devices("GPU")
-if gpus:
-    try:
-        for gpu in gpus:
-            tf.config.experimental.set_memory_growth(gpu, True)
-    except RuntimeError as e:
-        print(e)
-"""
 
 
 def run_genomcmcgan(
@@ -40,7 +28,6 @@ def run_genomcmcgan(
     parallelism,
 ):
 
-    #tf.random.set_seed(seed)
     np.random.seed(seed)
 
     # Check if folder with results exists, and create it otherwise
@@ -71,8 +58,8 @@ def run_genomcmcgan(
             model, in_shape=(genob.num_samples, genob.fixed_dim, 1)
         )
 
-    mcmcgan.discriminator.run_eagerly = True
-    tf.config.run_functions_eagerly(True)
+    #mcmcgan.discriminator.run_eagerly = True
+    #tf.config.run_functions_eagerly(True)
     mcmcgan.discriminator.fit(xtrain, xval, ytrain, yval, epochs)
 
     # Initial guess must always be a float, otherwise with an int there are errors
@@ -111,8 +98,8 @@ def run_genomcmcgan(
         stds = np.std(mcmcgan.samples, axis=2)
         for j, p in enumerate(inferable_params):
             print(f"{p.name} samples with mean {means[j]} and std {stds[j]}")
-        initial_guesses = tf.constant(means)
-        step_sizes = tf.constant(stds)
+        initial_guesses = means
+        step_sizes = stds
         # mcmcgan.step_sizes = tf.constant(np.sqrt(stds))
         mcmcgan.setup_mcmc(
             num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1

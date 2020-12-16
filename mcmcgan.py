@@ -3,8 +3,6 @@ import concurrent.futures
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-import tensorflow as tf
-import tensorflow_addons as tfa
 import littlemcmc as lmc
 from scipy import optimize
 
@@ -13,6 +11,8 @@ from training_utils import DMonitor, DMonitor2, ConfusionMatrix
 
 
 def _discriminator_build(args):
+    import tensorflow as tf
+    import tensorflow_addons as tfa
     from tensorflow import keras
     model_filename, model, in_shape = args
 
@@ -158,6 +158,7 @@ def _discriminator_build(args):
 
 
 def _discriminator_load(model_filename):
+    import tensorflow_addons as tfa
     from tensorflow import keras
     return keras.models.load_model(
         model_filename,
@@ -169,6 +170,7 @@ def _discriminator_load(model_filename):
 
 
 def _discriminator_fit(args):
+    import tensorflow as tf
     from tensorflow import keras
     model_filename, xtrain, xval, ytrain, yval, epochs = args
     cnn = _discriminator_load(model_filename)
@@ -197,7 +199,6 @@ def _discriminator_fit(args):
 
 
 def _discriminator_predict(args):
-    from tensorflow import keras
     model_filename, inputs = args
     cnn = _discriminator_load(model_filename)
     return cnn.predict(inputs)
@@ -262,8 +263,8 @@ class MCMCGAN:
         return np.log(score)
 
     def dlog_prob(self, x):
-        eps = np.sqrt(np.finfo(float).eps)
-        return optimize.approx_fprime(x, log_prob, eps)
+        eps = x * np.sqrt(np.finfo(float).eps)
+        return optimize.approx_fprime(x, self.log_prob, eps)
 
     def logp_dlogp(self, x):
         return self.log_prob(x), self.dlog_prob(x)
@@ -284,7 +285,7 @@ class MCMCGAN:
         self.step_sizes = step_sizes
         self.steps_between_results = steps_between_results
         self.samples = None
-        tf.print(self.step_sizes)
+        print(self.step_sizes)
 
         if self.kernel_name not in ["hmc", "nuts"]:
             raise NameError("kernel value must be either hmc or nuts")
