@@ -8,16 +8,13 @@
 
 # Importing libraries and modules
 import os
-
-if "TF_CPP_MIN_LOG_LEVEL" not in os.environ:
-    # Stop tensorflow from vomitting all over the console!
-    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-
 import pickle
 import time
 import argparse
+import torch
+import torch.nn as nn
 import numpy as np
-from mcmcgan import MCMCGAN, Discriminator
+from mcmcgantorch import MCMCGAN, Discriminator
 from genobuilder import Genobuilder
 
 
@@ -35,13 +32,13 @@ def run_genomcmcgan(
 
     np.random.seed(seed)
 
+
     # Check if folder with results exists, and create it otherwise
     if not os.path.exists("./results"):
         os.makedirs("./results")
 
     with open(genobuilder, "rb") as obj:
         genob = pickle.load(obj)
-
     genob.parallelism = parallelism
 
     # Generate the training and validation datasets
@@ -52,20 +49,28 @@ def run_genomcmcgan(
         xtrain, xval, ytrain, yval = genob.generate_data(num_reps=1000)
 
     mcmcgan = MCMCGAN(genob, kernel_name, seed)
+    mcmcgan.discriminator = Discriminator()
 
-    # Load a given discriminator or build one of the implemented ones
-    if discriminator_model:
-        mcmcgan.discriminator = Discriminator(discriminator_model)
-    else:
-        model = 19
-        mcmcgan.discriminator = Discriminator(f"D{model}_trained_{epochs}e.h5")
-        mcmcgan.discriminator.build(
-            model, in_shape=(genob.num_samples, genob.fixed_dim, 1)
-        )
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.device_count() > 1:
+        print("Using", torch.cuda.device_count(), "GPUs")
+        # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
+        mcmcgan.discriminator = nn.DataParallel(mcmcgan.discriminator)
 
-    #mcmcgan.discriminator.run_eagerly = True
-    #tf.config.run_functions_eagerly(True)
-    mcmcgan.discriminator.fit(xtrain, xval, ytrain, yval, epochs)
+    mcmcgan.discriminator.to(device)
+    #summary(my_nn, (1, 99, 128))
+
+    xtrain = torch.Tensor(xtrain).float().to(device)
+    ytrain = torch.Tensor(ytrain).float().unsqueeze(-1).to(device)
+    trainset = torch.utils.data.TensorDataset(xtrain, ytrain)
+    trainflow = torch.utils.data.DataLoader(trainset, 32, True)
+    xval = torch.Tensor(xval).float().to(device)
+    yval = torch.Tensor(yval).float().unsqueeze(-1).to(device)
+    valset = torch.utils.data.TensorDataset(xval, yval)
+    valflow = torch.utils.data.DataLoader(valset, 32, True)
+
+    # After wrappinf the cnn model with DataParallel, -.module.- is necessary
+    mcmcgan.discriminator.module.fit(trainflow, valflow, epochs, lr=0.0002)
 
     # Initial guess must always be a float, otherwise with an int there are errors
     inferable_params = []
@@ -109,6 +114,19 @@ def run_genomcmcgan(
         mcmcgan.setup_mcmc(
             num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1
         )
+
+        xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(
+            num_mcmc_samples, proposals=True
+        )
+
+        xtrain = torch.Tensor(xtrain).float().to(device)
+        ytrain = torch.Tensor(ytrain).float().unsqueeze(-1).to(device)
+        trainset = torch.utils.data.TensorDataset(xtrain, ytrain)
+        trainflow = torch.utils.data.DataLoader(trainset, 32, True)
+        xval = torch.Tensor(xval).float().to(device)
+        yval = torch.Tensor(yval).float().unsqueeze(-1).to(device)
+        valset = torch.utils.data.TensorDataset(xval, yval)
+        valflow = torch.utils.data.DataLoader(valset, 32, True)
 
         mcmcgan.discriminator.fit(xtrain, xval, ytrain, yval, epochs)
 

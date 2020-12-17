@@ -196,7 +196,7 @@ class Genobuilder:
             print("time out!")
 
         # Expand dimension by 1 (add channel dim). -1 stands for last axis.
-        mat = np.expand_dims(mat, axis=-1)
+        mat = np.expand_dims(mat, axis=1)
 
         return mat
 
@@ -239,7 +239,7 @@ class Genobuilder:
 
             data[i] = self._resize_from_zarr(hap, relative_pos, alt_zarr)
 
-        data = np.expand_dims(data, axis=-1)
+        data = np.expand_dims(data, axis=1)
 
         return data
 
@@ -295,7 +295,7 @@ class Genobuilder:
                 mat[i] = self._resize_from_ts(ts, rng)
 
         # Expand dimension by 1 (add channel dim). -1 stands for last axis.
-        mat = np.expand_dims(mat, axis=-1)
+        mat = np.expand_dims(mat, axis=1)
 
         return mat
 
