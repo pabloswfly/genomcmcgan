@@ -105,8 +105,8 @@ def run_genomcmcgan(
         for i, p in enumerate(inferable_params):
             p.proposals = mcmcgan.samples[:, i]
 
-        means = np.mean(mcmcgan.samples, axis=1)
-        stds = np.std(mcmcgan.samples, axis=1)
+        means = np.mean(mcmcgan.samples, axis=0)
+        stds = np.std(mcmcgan.samples, axis=0)
         for j, p in enumerate(inferable_params):
             print(f"{p.name} samples with mean {means[j]} and std {stds[j]}")
         initial_guesses = means

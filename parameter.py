@@ -46,9 +46,6 @@ class Parameter:
             return self._val
 
         min, max = self.bounds
-        x = np.random.uniform(min, max)
+        x = np.random.uniform(np.log10(min), np.log10(max))
 
-        if self.log:
-            return np.float_power(10, x)
-        else:
-            return x
+        return np.float_power(10, x)

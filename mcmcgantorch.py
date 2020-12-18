@@ -149,7 +149,7 @@ class MCMCGAN:
         self.seed = seed
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    def D(self, x, num_reps=64):
+    def D(self, x, num_reps=100):
         """
         Simulate with parameters `x`, then classify the simulations with the
         discriminator. Returns the average over `num_replicates` simulations.
@@ -173,7 +173,7 @@ class MCMCGAN:
                     # We reject these parameter values by returning probability 0.
                     return -np.inf
                 proposals[p].val = x[i]
-                #print(f"{proposals[p].name}: {proposals[p].val}")
+                print(f"{proposals[p].name}: {proposals[p].val}")
 
                 i += 1
 
@@ -210,7 +210,7 @@ class MCMCGAN:
         elif self.kernel_name == "hmc":
             mcmc = tfp.mcmc.HamiltonianMonteCarlo(
                 target_log_prob_fn=self.unnormalized_log_prob,
-                num_leapfrog_steps=5,
+                num_leapfrog_steps=10,
                 step_size=self.step_sizes,
             )
 
@@ -268,14 +268,15 @@ class MCMCGAN:
         is_accepted = tf.reduce_mean(tf.cast(is_accepted, dtype=tf.float32))
         log_acc_r = tf.reduce_mean(tf.cast(log_acc_rat, dtype=tf.float32))
 
-        self.samples = samples
+        self.samples = samples.numpy()
         self.acceptance = is_accepted
 
-        return samples
+        return samples.numpy()
 
     def hist_samples(self, params, it, bins=10):
 
         colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
+        sns.set_style("darkgrid")
         for i, p in enumerate(params):
             sns.distplot(self.samples[:, i], color=colors[i])
             ymax = plt.ylim()[1]
@@ -296,8 +297,6 @@ class MCMCGAN:
         # EXPAND COLORS FOR MORE PARAMETERS
         colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
         sns.set_style("darkgrid")
-        print(len(params))
-        print(self.samples.shape)
         for i, p in enumerate(params):
             plt.plot(self.samples[:, i], c=colors[i], alpha=0.3)
             plt.hlines(
@@ -323,11 +322,10 @@ class MCMCGAN:
 
     def jointplot_samples(self, params, it):
 
-        print(list(param.values()))
-        p1 = list(params.values())[0]
-        p2 = list(params.values())[1]
+        p1, p2 = params
 
-        g = sns.jointplot(self.samples[:, 0], self.samples[:, 1], kind="kde")
+        print(self.samples[:,0])
+        g = sns.jointplot(x=self.samples[:, 0], y=self.samples[:, 1], kind="kde")
         g.plot_joint(sns.kdeplot, color="b", zorder=0, levels=6)
         g.plot_marginals(sns.rugplot, color="r", height=-0.15, clip_on=False)
         plt.xlim(p1.bounds)
