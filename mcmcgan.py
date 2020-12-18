@@ -218,9 +218,9 @@ class MCMCGAN:
 
         self.genob.num_reps = num_reps
         return tf.reduce_mean(
-            self.discriminator.predict(
-                self.genob.simulate_msprime(x).astype("float32")	
-            )	
+            self.discriminator.predict_on_batch(
+                self.genob.simulate_msprime(x).astype("float32")
+            )
         )
 
     # Where `D(x)` is the average discriminator output from n independent
