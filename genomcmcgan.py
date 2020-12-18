@@ -94,18 +94,19 @@ def run_genomcmcgan(
         print("Starting the MCMC sampling chain")
         start_t = time.time()
 
-        stats = mcmcgan.run_chain()
+        samples = mcmcgan.run_chain()
 
         # Draw traceplot and histogram of collected samples
         mcmcgan.traceplot_samples(inferable_params, it)
         mcmcgan.hist_samples(inferable_params, it)
-        mcmcgan.jointplot(it)
+        if mcmcgan.samples.shape[1] == 2:
+            mcmcgan.jointplot_samples(inferable_params, it)
 
         for i, p in enumerate(inferable_params):
-            p.proposals = mcmcgan.samples[:, :, i]
+            p.proposals = mcmcgan.samples[:, i]
 
-        means = np.mean(mcmcgan.samples, axis=2)
-        stds = np.std(mcmcgan.samples, axis=2)
+        means = np.mean(mcmcgan.samples, axis=1)
+        stds = np.std(mcmcgan.samples, axis=1)
         for j, p in enumerate(inferable_params):
             print(f"{p.name} samples with mean {means[j]} and std {stds[j]}")
         initial_guesses = means
@@ -128,13 +129,9 @@ def run_genomcmcgan(
         valset = torch.utils.data.TensorDataset(xval, yval)
         valflow = torch.utils.data.DataLoader(valset, 32, True)
 
-        mcmcgan.discriminator.fit(xtrain, xval, ytrain, yval, epochs)
+        mcmcgan.discriminator.module.fit(trainflow, valflow, epochs, lr=0.0002)
 
         it += 1
-        if training.history["accuracy"][-1] < 0.55:
-            print("convergence")
-            convergence = True
-
         t = time.time() - start_t
         print(f"A single iteration of the MCMC-GAN took {t} seconds")
 

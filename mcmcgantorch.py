@@ -1,15 +1,21 @@
 import copy
-import concurrent.futures
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import littlemcmc as lmc
-from scipy import optimize
-
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import os
+
+if "TF_CPP_MIN_LOG_LEVEL" not in os.environ:
+    # Stop tensorflow from vomitting all over the console!
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
+import tensorflow as tf
+import tensorflow_probability as tfp
+
 
 
 class Symmetric(nn.Module):
@@ -152,14 +158,15 @@ class MCMCGAN:
         self.genob.num_reps = num_reps
         genmats = torch.Tensor(self.genob.simulate_msprime(x)).to(self.device)
         out = self.discriminator.module.predict(genmats).cpu().numpy()
-        return np.mean(out)
+        return np.mean(out.astype(np.float32))
 
     # Where `D(x)` is the average discriminator output from n independent
     # simulations (which are simulated with parameters `x`).
-    def log_prob(self, x):
+    def _unnormalized_log_prob(self, x):
 
         proposals = copy.deepcopy(self.genob.params)
         i = 0
+        x = x.numpy()
         for p in proposals:
             if proposals[p].inferable:
                 if not (proposals[p].bounds[0] < x[i] < proposals[p].bounds[1]):
@@ -170,16 +177,13 @@ class MCMCGAN:
 
                 i += 1
 
-        score = self.D(proposals)
-        #print(score)
-        return np.log(score)
+        score = tf.convert_to_tensor(self.D(proposals), tf.float32)
+        tf.print(score)
+        return tf.math.log(score)
 
-    def dlog_prob(self, x):
-        eps = x * np.sqrt(np.finfo(float).eps)
-        return optimize.approx_fprime(x, self.log_prob, eps)
+    def unnormalized_log_prob(self, x):
+        return tf.py_function(self._unnormalized_log_prob, inp=[x], Tout=tf.float32)
 
-    def logp_dlogp(self, x):
-        return self.log_prob(x), self.dlog_prob(x)
 
     def setup_mcmc(
         self,
@@ -190,64 +194,88 @@ class MCMCGAN:
         steps_between_results,
     ):
 
+        tf.config.run_functions_eagerly(True)
         # Initialize the HMC transition kernel.
         self.num_mcmc_results = num_mcmc_results
         self.num_burnin_steps = num_burnin_steps
-        self.initial_guess = initial_guess
-        self.step_sizes = step_sizes
+        self.initial_guess = tf.constant(initial_guess, tf.float32)
+        self.step_sizes = tf.constant(step_sizes, tf.float32)
         self.steps_between_results = steps_between_results
         self.samples = None
-        print(self.step_sizes)
         model_ndim = len(initial_guess)
 
         if self.kernel_name not in ["hmc", "nuts"]:
             raise NameError("kernel value must be either hmc or nuts")
 
         elif self.kernel_name == "hmc":
-            self.mcmc_kernel = lmc.HamiltonianMC(
-                logp_dlogp_func=self.logp_dlogp,
-                model_ndim=model_ndim,
-                target_accept=0.75,
-                adapt_step_size=True,
+            mcmc = tfp.mcmc.HamiltonianMonteCarlo(
+                target_log_prob_fn=self.unnormalized_log_prob,
+                num_leapfrog_steps=5,
+                step_size=self.step_sizes,
+            )
+
+            self.mcmc_kernel = tfp.mcmc.SimpleStepSizeAdaptation(
+                mcmc,
+                num_adaptation_steps=int(self.num_burnin_steps * 0.8),
+                target_accept_prob=0.70,
             )
 
         # Good NUTS tutorial: https://adamhaber.github.io/post/nuts/
         elif self.kernel_name == "nuts":
-            self.mcmc_kernel = lmc.NUTS(
-                logp_dlogp_func=self.logp_dlogp,
-                model_ndim=model_ndim,
-                target_accept=0.75,
-                adapt_step_size=True,
+            mcmc = tfp.mcmc.NoUTurnSampler(
+                target_log_prob_fn=self.unnormalized_log_prob,
+                step_size=self.step_sizes,
+                max_tree_depth=10,
+                max_energy_diff=1000.0,
+            )
+
+            self.mcmc_kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
+                mcmc,
+                num_adaptation_steps=int(self.num_burnin_steps * 0.8),
+                target_accept_prob=0.3,
+                step_size_setter_fn=lambda pkr, new_step_size: pkr._replace(
+                    step_size=new_step_size
+                ),
+                step_size_getter_fn=lambda pkr: pkr.step_size,
+                log_accept_prob_getter_fn=lambda pkr: pkr.log_accept_ratio,
             )
 
     # Run the chain (with burn-in).
     # autograph=False is recommended by the TFP team. It is related to how
     # control-flow statements are handled.
     # experimental_compile=True for higher efficiency in XLA_GPUs, TPUs, etc...
-    # @tf.function(autograph=False, experimental_compile=True)
+    @tf.function(autograph=False, experimental_compile=True)
     def run_chain(self):
 
+        is_accepted = None
+        log_acc_r = None
+        tf_seed = tf.constant(self.seed)
         print(f"Selected mcmc kernel is {self.kernel_name}")
 
-        trace, stats = lmc.sample(
-            logp_dlogp_func=self.logp_dlogp,
-            model_ndim=1,
-            step=self.mcmc_kernel,
-            draws=self.num_mcmc_results,
-            tune=self.num_burnin_steps,
-            start=self.initial_guess,
-            chains=1,
-            progressbar=True,
-            random_seed=self.seed,
+        samples, [is_accepted, log_acc_rat] = tfp.mcmc.sample_chain(
+            num_results=self.num_mcmc_results,
+            num_burnin_steps=self.num_burnin_steps,
+            current_state=self.initial_guess,
+            kernel=self.mcmc_kernel,
+            seed=tf_seed,
+            num_steps_between_results=self.steps_between_results,
+            trace_fn=lambda _, pkr: [
+                pkr.inner_results.is_accepted,
+                pkr.inner_results.log_accept_ratio,
+            ],
         )
 
-        self.samples = trace
+        is_accepted = tf.reduce_mean(tf.cast(is_accepted, dtype=tf.float32))
+        log_acc_r = tf.reduce_mean(tf.cast(log_acc_rat, dtype=tf.float32))
 
-        return stats
+        self.samples = samples
+        self.acceptance = is_accepted
+
+        return samples
 
     def hist_samples(self, params, it, bins=10):
 
-        colors = ["b", "g", "r"]
+        colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
         for i, p in enumerate(params):
             sns.distplot(self.samples[:, i], color=colors[i])
             ymax = plt.ylim()[1]
@@ -266,8 +294,10 @@ class MCMCGAN:
     def traceplot_samples(self, params, it):
 
         # EXPAND COLORS FOR MORE PARAMETERS
-        colors = ["b", "g", "r"]
+        colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
         sns.set_style("darkgrid")
+        print(len(params))
+        print(self.samples.shape)
         for i, p in enumerate(params):
             plt.plot(self.samples[:, i], c=colors[i], alpha=0.3)
             plt.hlines(
@@ -282,7 +312,8 @@ class MCMCGAN:
             plt.xlabel("Accepted samples")
             plt.ylabel("Values")
             plt.title(
-                f"Trace plot of {self.kernel_name} samples for {p.name} at {it}."
+                f"Trace plot of {self.kernel_name} samples for {p.name}"
+                f" at {it}. Acc. rate: {self.acceptance:.3f}"
             )
             plt.savefig(
                 f"./results/mcmcgan_{self.kernel_name}_traceplot_it{it}"
@@ -290,13 +321,19 @@ class MCMCGAN:
             )
             plt.clf()
 
-    def jointplot(self, it):
+    def jointplot_samples(self, params, it):
+
+        print(list(param.values()))
+        p1 = list(params.values())[0]
+        p2 = list(params.values())[1]
 
         g = sns.jointplot(self.samples[:, 0], self.samples[:, 1], kind="kde")
         g.plot_joint(sns.kdeplot, color="b", zorder=0, levels=6)
         g.plot_marginals(sns.rugplot, color="r", height=-0.15, clip_on=False)
-        plt.xlabel("P1")
-        plt.ylabel("P2")
+        plt.xlim(p1.bounds)
+        plt.ylim(p2.bounds)
+        plt.xlabel(p1.name)
+        plt.ylabel(p2.name)
         plt.title(f"Jointplot at iteration {it}")
         plt.savefig(f"./results/jointplot_{it}.png")
         plt.clf()
