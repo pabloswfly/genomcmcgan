@@ -14,7 +14,7 @@ import argparse
 import torch
 import torch.nn as nn
 import numpy as np
-from mcmcgantorch import MCMCGAN, Discriminator
+from mcmcgan import MCMCGAN, Discriminator
 from genobuilder import Genobuilder
 
 
@@ -31,7 +31,6 @@ def run_genomcmcgan(
 ):
 
     np.random.seed(seed)
-
 
     # Check if folder with results exists, and create it otherwise
     if not os.path.exists("./results"):
@@ -58,7 +57,6 @@ def run_genomcmcgan(
         mcmcgan.discriminator = nn.DataParallel(mcmcgan.discriminator)
 
     mcmcgan.discriminator.to(device)
-    #summary(my_nn, (1, 99, 128))
 
     xtrain = torch.Tensor(xtrain).float().to(device)
     ytrain = torch.Tensor(ytrain).float().unsqueeze(-1).to(device)
@@ -70,7 +68,7 @@ def run_genomcmcgan(
     valflow = torch.utils.data.DataLoader(valset, 32, True)
 
     # After wrappinf the cnn model with DataParallel, -.module.- is necessary
-    mcmcgan.discriminator.module.fit(trainflow, valflow, epochs, lr=0.0002)
+    mcmcgan.discriminator.module.fit(trainflow, valflow, epochs, lr=0.0005)
 
     # Initial guess must always be a float, otherwise with an int there are errors
     inferable_params = []
@@ -80,7 +78,7 @@ def run_genomcmcgan(
             inferable_params.append(p)
 
     initial_guesses = np.array([float(p.initial_guess) for p in inferable_params])
-    step_sizes = np.array([float(p.initial_guess * 0.1) for p in inferable_params])
+    step_sizes = np.array([float(p.initial_guess*0.1) for p in inferable_params])
     mcmcgan.setup_mcmc(
         num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1
     )
@@ -91,15 +89,16 @@ def run_genomcmcgan(
 
     while not convergence and max_num_iters != it:
 
-        print("Starting the MCMC sampling chain")
+        print(f"Starting the MCMC sampling chain for iteration {it}")
         start_t = time.time()
 
-        samples = mcmcgan.run_chain()
+        is_accepted, log_acc_rate = mcmcgan.run_chain()
+        print(f"Is accepted: {is_accepted}, acc_rate: {log_acc_rate}")
 
         # Draw traceplot and histogram of collected samples
         mcmcgan.traceplot_samples(inferable_params, it)
         mcmcgan.hist_samples(inferable_params, it)
-        if mcmcgan.samples.shape[1] == 2:
+        if mcmcgan.samples.shape[1] > 1:
             mcmcgan.jointplot_samples(inferable_params, it)
 
         for i, p in enumerate(inferable_params):

@@ -7,10 +7,7 @@ class Parameter:
     ):
 
         self.name = name
-        if log:
-            self._val = np.float_power(10, val)
-        else:
-            self._val = val
+        self._val = val
         self._proposals = []
         self.bounds = bounds
         self.log = log
@@ -28,10 +25,7 @@ class Parameter:
 
     @val.setter
     def val(self, x):
-        if self.log:
-            self._val = np.float_power(10, x)
-        else:
-            self._val = x
+        self._val = x
 
     @proposals.setter
     def proposals(self, prop):
@@ -46,6 +40,8 @@ class Parameter:
             return self._val
 
         min, max = self.bounds
-        x = np.random.uniform(np.log10(min), np.log10(max))
-
-        return np.float_power(10, x)
+        if self.log:
+            x = np.random.uniform(np.log10(min), np.log10(max))
+            return np.float_power(10, x)
+        else:
+            return np.random.uniform(min, max)

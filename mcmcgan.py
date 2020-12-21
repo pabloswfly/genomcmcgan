@@ -1,217 +1,150 @@
 import copy
-import concurrent.futures
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-import littlemcmc as lmc
-from scipy import optimize
 
-from symmetric import Symmetric
-from training_utils import DMonitor, DMonitor2, ConfusionMatrix
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import os
 
+if "TF_CPP_MIN_LOG_LEVEL" not in os.environ:
+    # Stop tensorflow from vomitting all over the console!
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
-def _discriminator_build(args):
-    import tensorflow_addons as tfa
-    from tensorflow import keras
-    model_filename, model, in_shape = args
-
-    """Build different Convnet models with permutation variance property"""
-
-    cnn = keras.models.Sequential(name="discriminator")
-
-    if model == 17:
-        """Model 16 with no BN and with Weight Normalization.
-        Paper: https://arxiv.org/pdf/1704.03971.pdf"""
-
-        cnn.add(keras.layers.BatchNormalization())
-        # None in input_shape for dimensions with variable size.
-        cnn.add(
-            tfa.layers.WeightNormalization(
-                keras.layers.Conv2D(
-                    filters=8,
-                    kernel_size=(1, 5),
-                    padding="same",
-                    strides=(1, 2),
-                    input_shape=in_shape,
-                )
-            )
-        )
-        cnn.add(keras.layers.LeakyReLU(0.3))
-
-        cnn.add(Symmetric("max", axis=1))
-
-        cnn.add(
-            tfa.layers.WeightNormalization(
-                keras.layers.Conv2D(
-                    filters=16, kernel_size=(1, 5), padding="same", strides=(1, 2)
-                )
-            )
-        )
-        cnn.add(keras.layers.LeakyReLU(0.3))
-        cnn.add(keras.layers.Dropout(0.5))
-
-        cnn.add(Symmetric("max", axis=2))
-
-    elif model == 18:
-
-        cnn.add(keras.layers.BatchNormalization(name="BatchNorm_1"))
-        # None in input_shape for dimensions with variable size.
-        cnn.add(
-            tfa.layers.WeightNormalization(
-                keras.layers.Conv2D(
-                    filters=32,
-                    kernel_size=(1, 5),
-                    padding="same",
-                    strides=(1, 2),
-                    input_shape=in_shape,
-                ),
-                name="Conv2D_WeightNorm_1",
-            )
-        )
-        cnn.add(keras.layers.LeakyReLU(0.3, name="LeakyReLU_1"))
-        cnn.add(keras.layers.BatchNormalization(name="BatchNorm_2"))
-
-        cnn.add(Symmetric("sum", axis=1, name="Symmetric_1"))
-
-        cnn.add(
-            tfa.layers.WeightNormalization(
-                keras.layers.Conv2D(
-                    filters=64, kernel_size=(1, 5), padding="same", strides=(1, 2)
-                ),
-                name="Conv2D_WeightNorm_2",
-            )
-        )
-        cnn.add(keras.layers.LeakyReLU(0.3, name="LeakyReLU_2"))
-        cnn.add(keras.layers.BatchNormalization(name="BatchNorm_3"))
-        cnn.add(keras.layers.Dropout(0.5, name="Dropout"))
-
-        cnn.add(Symmetric("sum", axis=2, name="Symmetric_2"))
-
-    elif model == 19:
-
-        cnn.add(keras.layers.BatchNormalization(name="BatchNorm_1"))
-        # None in input_shape for dimensions with variable size.
-        cnn.add(
-            keras.layers.Conv2D(
-                filters=32,
-                kernel_size=(1, 5),
-                padding="same",
-                strides=(1, 2),
-                input_shape=in_shape,
-            )
-        )
-        cnn.add(keras.layers.LeakyReLU(0.3))
-        cnn.add(keras.layers.BatchNormalization())
-
-        cnn.add(Symmetric("sum", axis=1))
-
-        cnn.add(
-            keras.layers.Conv2D(
-                filters=64, kernel_size=(1, 5), padding="same", strides=(1, 2)
-            )
-        )
-        cnn.add(keras.layers.LeakyReLU(0.3))
-        cnn.add(keras.layers.BatchNormalization())
-        cnn.add(keras.layers.Dropout(0.5))
-
-        cnn.add(Symmetric("sum", axis=2))
-
-    elif model == 20:
-
-        # None in input_shape for dimensions with variable size.
-        cnn.add(
-            tfa.layers.WeightNormalization(
-                keras.layers.Conv2D(
-                    filters=32,
-                    kernel_size=(1, 5),
-                    padding="same",
-                    strides=(1, 2),
-                    input_shape=in_shape,
-                )
-            )
-        )
-        cnn.add(keras.layers.LeakyReLU(0.3))
-        cnn.add(keras.layers.BatchNormalization())
-
-        cnn.add(Symmetric("sum", axis=1))
-
-        cnn.add(
-            tfa.layers.WeightNormalization(
-                keras.layers.Conv2D(
-                    filters=64, kernel_size=(1, 5), padding="same", strides=(1, 2)
-                )
-            )
-        )
-        cnn.add(keras.layers.LeakyReLU(0.3))
-        cnn.add(keras.layers.BatchNormalization())
-        cnn.add(keras.layers.Dropout(0.5))
-
-        cnn.add(Symmetric("sum", axis=2))
-
-    cnn.add(keras.layers.Flatten(name="Flatten"))
-    cnn.add(keras.layers.Dense(128, activation="relu", name="Dense"))
-    cnn.add(keras.layers.Dense(1, activation="sigmoid", name="Output_dense"))
-
-    cnn.build(input_shape=(None, *in_shape))
-    cnn.save(model_filename)
+import tensorflow as tf
+import tensorflow_probability as tfp
 
 
-def _discriminator_load(model_filename):
-    import tensorflow_addons as tfa
-    from tensorflow import keras
-    return keras.models.load_model(
-        model_filename,
-        custom_objects={
-            "Symmetric": Symmetric,
-            "Addons>WeightNormalization": tfa.layers.WeightNormalization,
-        },
-    )
+
+class Symmetric(nn.Module):
+    """Class for permutation invariant cnn. This layer collapses
+    the dimension specified in the given axis using a summary statistic"""
+
+    def __init__(self, function, axis, **kwargs):
+        self.function = function
+        self.axis = axis
+        super(Symmetric, self).__init__(**kwargs)
+
+    def forward(self, x):
+        if self.function == "sum":
+            out = torch.sum(x, dim=self.axis, keepdim=True)
+        elif self.function == "mean":
+            out = torch.mean(x, dim=self.axis, keepdim=True)
+        elif self.function == "min":
+            out = torch.min(x, dim=self.axis, keepdim=True)
+        elif self.function == "max":
+            out = torch.max(x, dim=self.axis, keepdim=True)
+        return out
 
 
-def _discriminator_fit(args):
-    from tensorflow import keras
-    model_filename, xtrain, xval, ytrain, yval, epochs = args
-    cnn = _discriminator_load(model_filename)
 
-    # Prepare the optimizer and loss function
-    loss_fn = keras.losses.BinaryCrossentropy(from_logits=True)
-    opt = keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5)
-    cnn.compile(optimizer=opt, loss=loss_fn, metrics=["accuracy"])
+class Discriminator(nn.Module):
+    def __init__(self):
+        super(Discriminator, self).__init__()
 
-    batch_size = 32
-    training = cnn.fit(
-        xtrain, ytrain, batch_size, epochs, validation_data=(xval, yval), shuffle=True
-    )
+        # 1 because it is only 1 channel in a tensor (N, C, H, W)
+        self.batch1 = nn.BatchNorm2d(1, eps=0.001, momentum=0.99)
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=(1, 5),
+                            stride=(1, 2), padding=(0, 2))
+        self.batch2 = nn.BatchNorm2d(32, eps=0.001, momentum=0.99)
 
-    # Save the keras model
-    cnn.summary(line_length=75, positions=[0.58, 0.86, 0.99, 0.1])
-    cnn.save(model_filename)
+        self.symm1 = Symmetric("sum", 2)
 
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(1, 5),
+                            stride=(1, 2), padding=(0, 2))
+        self.batch3 = nn.BatchNorm2d(64, eps=0.001, momentum=0.99)
+        self.dropout1 = nn.Dropout2d(0.5)
 
-def _discriminator_predict(args):
-    model_filename, inputs = args
-    cnn = _discriminator_load(model_filename)
-    return cnn.predict(inputs)
+        self.symm2 = Symmetric("sum", 3)
+
+        self.fc1 = nn.Linear(64, 32)
+        self.fc2 = nn.Linear(32, 1)
 
 
-class Discriminator:
-    def __init__(self, model_filename):
-        self.model_filename = model_filename
+    # x represents our data
+    def forward(self, x):
 
-    def build(self, model, in_shape):
-        with concurrent.futures.ProcessPoolExecutor(max_workers=1) as ex:
-            next(ex.map(_discriminator_build, [(self.model_filename, model, in_shape)]))
+        x = self.batch1(x)
+        x = self.conv1(x)
+        x = F.leaky_relu(x, 0.3)
+        x = self.batch2(x)
 
-    def fit(self, xtrain, xval, ytrain, yval, epochs):
-        args = (self.model_filename, xtrain, xval, ytrain, yval, epochs)
-        with concurrent.futures.ProcessPoolExecutor(max_workers=1) as ex:
-            next(ex.map(_discriminator_fit, [args]))
+        x = self.symm1(x)
+
+        x = self.conv2(x)
+        x = F.leaky_relu(x, 0.3)
+
+        x = self.batch3(x)
+        x = self.dropout1(x)
+
+        x = self.symm2(x)
+
+        x = torch.flatten(x, 1)
+
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+
+        output = torch.sigmoid(x)
+        return output
+
+
+    def weights_init(self, m):
+        if isinstance(m, nn.Conv2d):
+            torch.nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                torch.nn.init.zeros_(m.bias)
+
+
+    def get_accuracy(self, y_true, y_prob):
+
+        y_true = y_true.squeeze()
+        y_prob = y_prob.squeeze()
+        y_prob = y_prob > 0.5
+        return (y_true == y_prob).sum().item() / y_true.size(0)
+
+
+    def fit(self, trainflow, valflow, epochs, lr):
+
+        optimizer = torch.optim.Adam(self.parameters(), lr)
+        lossf = nn.BCELoss()
+        print('Initializing weights of the model')
+        self.apply(self.weights_init)
+        self.train()
+
+        for epoch in range(epochs):  # loop over the dataset multiple times
+
+            running_loss = 0.0
+            for i, (inputs, labels) in enumerate(trainflow, 0):
+
+                # zero the parameter gradients
+                optimizer.zero_grad()
+
+                # forward + backward + optimize
+                out = self(inputs)
+                loss = lossf(out, labels)
+                loss.mean().backward()
+                optimizer.step()
+
+                # print statistics
+                running_loss += loss.item()
+                if i % 20 == 19:    # print every 20 mini-batches
+                    print('[%d, %5d] loss: %.3f training acc: %.3f' %
+                          (epoch+1, i+1, running_loss/20, self.get_accuracy(labels, out)), end= "\r")
+                    running_loss = 0.0
+
+            print('')
+            with torch.no_grad():
+                for genmats, labels in valflow:
+                    preds = self(genmats)
+                    print('[%d] validation acc: %.3f' % (epoch+1, self.get_accuracy(labels, preds)), end= "\r")
+            print('')
 
     def predict(self, inputs):
-        with concurrent.futures.ProcessPoolExecutor(max_workers=1) as ex:
-            preds = next(
-                ex.map(_discriminator_predict, [(self.model_filename, inputs)])
-            )
+        self.eval()
+        with torch.no_grad():
+            preds = self(inputs)
         return preds
 
 
@@ -224,43 +157,43 @@ class MCMCGAN:
         self.discriminator = discriminator
         self.kernel_name = kernel_name
         self.seed = seed
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    def D(self, x, num_reps=64):
+    def D(self, x, num_reps=100):
         """
         Simulate with parameters `x`, then classify the simulations with the
         discriminator. Returns the average over `num_replicates` simulations.
         """
 
         self.genob.num_reps = num_reps
-
-        return np.mean(self.discriminator.predict(self.genob.simulate_msprime(x)))
+        genmats = torch.Tensor(self.genob.simulate_msprime(x)).to(self.device)
+        out = self.discriminator.module.predict(genmats).cpu().numpy()
+        return np.mean(out.astype(np.float32))
 
     # Where `D(x)` is the average discriminator output from n independent
     # simulations (which are simulated with parameters `x`).
-    def log_prob(self, x):
+    def _unnormalized_log_prob(self, x):
 
         proposals = copy.deepcopy(self.genob.params)
         i = 0
+        x = x.numpy()
         for p in proposals:
             if proposals[p].inferable:
                 if not (proposals[p].bounds[0] < x[i] < proposals[p].bounds[1]):
                     # We reject these parameter values by returning probability 0.
                     return -np.inf
                 proposals[p].val = x[i]
-                #print(f"{proposals[p].name}: {proposals[p].val}")
+                print(f"{proposals[p].name}: {proposals[p].val}")
 
                 i += 1
 
-        score = self.D(proposals)
-        #print(score)
-        return np.log(score)
+        score = tf.convert_to_tensor(self.D(proposals), tf.float32)
+        tf.print(score)
+        return tf.math.log(score)
 
-    def dlog_prob(self, x):
-        eps = x * np.sqrt(np.finfo(float).eps)
-        return optimize.approx_fprime(x, self.log_prob, eps)
+    def unnormalized_log_prob(self, x):
+        return tf.py_function(self._unnormalized_log_prob, inp=[x], Tout=tf.float32)
 
-    def logp_dlogp(self, x):
-        return self.log_prob(x), self.dlog_prob(x)
 
     def setup_mcmc(
         self,
@@ -271,63 +204,88 @@ class MCMCGAN:
         steps_between_results,
     ):
 
+        tf.config.run_functions_eagerly(True)
         # Initialize the HMC transition kernel.
         self.num_mcmc_results = num_mcmc_results
         self.num_burnin_steps = num_burnin_steps
-        self.initial_guess = initial_guess
-        self.step_sizes = step_sizes
+        self.initial_guess = tf.constant(initial_guess, tf.float32)
+        self.step_sizes = tf.constant(step_sizes, tf.float32)
         self.steps_between_results = steps_between_results
         self.samples = None
-        print(self.step_sizes)
 
         if self.kernel_name not in ["hmc", "nuts"]:
             raise NameError("kernel value must be either hmc or nuts")
 
         elif self.kernel_name == "hmc":
-            self.mcmc_kernel = lmc.HamiltonianMC(
-                logp_dlogp_func=self.logp_dlogp,
-                model_ndim=1,
-                target_accept=0.75,
-                adapt_step_size=True,
+            mcmc = tfp.mcmc.HamiltonianMonteCarlo(
+                target_log_prob_fn=self.unnormalized_log_prob,
+                num_leapfrog_steps=10,
+                step_size=self.step_sizes,
+            )
+
+            self.mcmc_kernel = tfp.mcmc.SimpleStepSizeAdaptation(
+                mcmc,
+                num_adaptation_steps=int(self.num_burnin_steps * 0.8),
+                target_accept_prob=0.70,
             )
 
         # Good NUTS tutorial: https://adamhaber.github.io/post/nuts/
         elif self.kernel_name == "nuts":
-            self.mcmc_kernel = lmc.NUTS(
-                logp_dlogp_func=self.logp_dlogp,
-                model_ndim=1,
-                target_accept=0.75,
-                adapt_step_size=True,
+            mcmc = tfp.mcmc.NoUTurnSampler(
+                target_log_prob_fn=self.unnormalized_log_prob,
+                step_size=self.step_sizes,
+                max_tree_depth=10,
+                max_energy_diff=1000.0,
+            )
+
+            self.mcmc_kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
+                mcmc,
+                num_adaptation_steps=int(self.num_burnin_steps * 0.8),
+                target_accept_prob=0.3,
+                step_size_setter_fn=lambda pkr, new_step_size: pkr._replace(
+                    step_size=new_step_size
+                ),
+                step_size_getter_fn=lambda pkr: pkr.step_size,
+                log_accept_prob_getter_fn=lambda pkr: pkr.log_accept_ratio,
             )
 
     # Run the chain (with burn-in).
     # autograph=False is recommended by the TFP team. It is related to how
     # control-flow statements are handled.
     # experimental_compile=True for higher efficiency in XLA_GPUs, TPUs, etc...
-    # @tf.function(autograph=False, experimental_compile=True)
+    @tf.function(autograph=False, experimental_compile=True)
     def run_chain(self):
 
+        is_accepted = None
+        log_acc_r = None
+        tf_seed = tf.constant(self.seed)
         print(f"Selected mcmc kernel is {self.kernel_name}")
 
-        trace, stats = lmc.sample(
-            logp_dlogp_func=self.logp_dlogp,
-            model_ndim=1,
-            step=self.mcmc_kernel,
-            draws=self.num_mcmc_results,
-            tune=self.num_burnin_steps,
-            start=self.initial_guess,
-            chains=1,
-            progressbar=True,
-            random_seed=self.seed,
+        samples, [is_accepted, log_acc_rat] = tfp.mcmc.sample_chain(
+            num_results=self.num_mcmc_results,
+            num_burnin_steps=self.num_burnin_steps,
+            current_state=self.initial_guess,
+            kernel=self.mcmc_kernel,
+            seed=tf_seed,
+            num_steps_between_results=self.steps_between_results,
+            trace_fn=lambda _, pkr: [
+                pkr.inner_results.is_accepted,
+                pkr.inner_results.log_accept_ratio,
+            ],
         )
 
-        self.samples = trace
+        is_accepted = tf.reduce_mean(tf.cast(is_accepted, dtype=tf.float32))
+        log_acc_r = tf.reduce_mean(tf.cast(log_acc_rat, dtype=tf.float32))
 
-        return stats
+        self.samples = samples.numpy()
+        self.acceptance = is_accepted
+
+        return is_accepted, log_acc_r
 
     def hist_samples(self, params, it, bins=10):
 
-        colors = ["b", "g", "r"]
+        colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
+        sns.set_style("darkgrid")
         for i, p in enumerate(params):
             sns.distplot(self.samples[:, i], color=colors[i])
             ymax = plt.ylim()[1]
@@ -346,7 +304,7 @@ class MCMCGAN:
     def traceplot_samples(self, params, it):
 
         # EXPAND COLORS FOR MORE PARAMETERS
-        colors = ["b", "g", "r"]
+        colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
         sns.set_style("darkgrid")
         for i, p in enumerate(params):
             plt.plot(self.samples[:, i], c=colors[i], alpha=0.3)
@@ -371,13 +329,18 @@ class MCMCGAN:
             )
             plt.clf()
 
-    def jointplot(self, it):
+    def jointplot_samples(self, params, it):
 
-        g = sns.jointplot(self.samples[:, 0], self.samples[:, 1], kind="kde")
+        p1 = params[0]
+        p2 = params[1]
+
+        g = sns.jointplot(x=self.samples[:, 0], y=self.samples[:, 1], kind="kde")
         g.plot_joint(sns.kdeplot, color="b", zorder=0, levels=6)
         g.plot_marginals(sns.rugplot, color="r", height=-0.15, clip_on=False)
-        plt.xlabel("P1")
-        plt.ylabel("P2")
+        plt.xlim(p1.bounds)
+        plt.ylim(p2.bounds)
+        plt.xlabel(p1.name)
+        plt.ylabel(p2.name)
         plt.title(f"Jointplot at iteration {it}")
         plt.savefig(f"./results/jointplot_{it}.png")
         plt.clf()
