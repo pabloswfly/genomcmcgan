@@ -44,44 +44,45 @@ class Discriminator(nn.Module):
 
         # 1 because it is only 1 channel in a tensor (N, C, H, W)
         self.batch1 = nn.BatchNorm2d(1, eps=0.001, momentum=0.99)
-        self.conv1 = nn.utils.weight_norm(nn.Conv2d(
+        self.conv1 = nn.Conv2d(
             in_channels=1,
-            out_channels=32,
-            kernel_size=(1, 5),
+            out_channels=64,
+            kernel_size=(1, 7),
             stride=(1, 2),
             padding=(0, 2),
-        ))
-        self.batch2 = nn.BatchNorm2d(32, eps=0.001, momentum=0.99)
+        )
+        self.batch2 = nn.BatchNorm2d(64, eps=0.001, momentum=0.99)
 
         self.symm1 = Symmetric("sum", 2)
 
-        self.conv2 = nn.utils.weight_norm(nn.Conv2d(
-            in_channels=32,
-            out_channels=64,
-            kernel_size=(1, 5),
+        self.conv2 = nn.Conv2d(
+            in_channels=64,
+            out_channels=128,
+            kernel_size=(1, 7),
             stride=(1, 2),
             padding=(0, 2),
-        ))
-        self.batch3 = nn.BatchNorm2d(64, eps=0.001, momentum=0.99)
+        )
+        self.batch3 = nn.BatchNorm2d(128, eps=0.001, momentum=0.99)
         self.dropout1 = nn.Dropout2d(0.5)
 
         self.symm2 = Symmetric("sum", 3)
 
-        self.fc1 = nn.Linear(64, 32)
-        self.fc2 = nn.Linear(32, 1)
+        self.fc1 = nn.Linear(128, 64)
+        self.fc2 = nn.Linear(64, 32)
+        self.fc3 = nn.Linear(32, 1)
 
     # x represents our data
     def forward(self, x):
 
         x = self.batch1(x)
         x = self.conv1(x)
-        x = F.leaky_relu(x, 0.3)
+        x = F.relu(x)
         x = self.batch2(x)
 
         x = self.symm1(x)
 
         x = self.conv2(x)
-        x = F.leaky_relu(x, 0.3)
+        x = F.relu(x)
 
         x = self.batch3(x)
         x = self.dropout1(x)
@@ -93,8 +94,10 @@ class Discriminator(nn.Module):
         x = self.fc1(x)
         x = F.relu(x)
         x = self.fc2(x)
-
+        x = F.relu(x)
+        x = self.fc3(x)
         output = torch.sigmoid(x)
+
         return output
 
     def weights_init(self, m):
@@ -114,14 +117,17 @@ class Discriminator(nn.Module):
 
         optimizer = torch.optim.Adam(self.parameters(), lr)
         lossf = nn.BCELoss()
+        best_val_loss = 1.
+
         print("Initializing weights of the model")
         self.apply(self.weights_init)
         self.train()
 
         for epoch in range(epochs):  # loop over the dataset multiple times
 
-            running_loss = 0.0
-            for i, (inputs, labels) in enumerate(trainflow, 0):
+            train_loss, val_loss, acc_train, acc_val = [0.0, 0.0, 0.0, 0.0]
+
+            for i, (inputs, labels) in enumerate(trainflow, 1):
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
@@ -133,30 +139,43 @@ class Discriminator(nn.Module):
                 optimizer.step()
 
                 # print statistics
-                running_loss += loss.item()
-                if i % 20 == 19:  # print every 20 mini-batches
+                train_loss += loss.item()
+                acc_train += self.get_accuracy(labels, out)
+                if i % 20 == 0:  # print every 20 mini-batches
                     print(
-                        "[%d, %5d] loss: %.3f training acc: %.3f"
+                        "[%d | %d] TRAINING: loss: %.3f | acc: %.3f"
                         % (
                             epoch + 1,
-                            i + 1,
-                            running_loss / 20,
-                            self.get_accuracy(labels, out),
+                            i,
+                            train_loss / i,
+                            acc_train / i,
                         ),
                         end="\r",
                     )
-                    running_loss = 0.0
 
             print("")
             with torch.no_grad():
-                for genmats, labels in valflow:
+                for j, (genmats, labels) in enumerate(valflow, 1):
                     preds = self(genmats)
+                    val_loss += lossf(preds, labels).item()
+                    acc_val += self.get_accuracy(labels, preds)
                     print(
-                        "[%d] validation acc: %.3f"
-                        % (epoch + 1, self.get_accuracy(labels, preds)),
+                        "        VALIDATION: loss: %.3f - acc: %.3f"
+                        % (
+                            val_loss / j,
+                            acc_val / j,
+                        ),
                         end="\r",
                     )
+                if (val_loss / j) < best_val_loss:
+                    best_val_loss = val_loss / j
+                    best_epoch = epoch + 1
+                    best_model = copy.deepcopy(self.state_dict())
+
             print("")
+
+        self.load_state_dict(best_model)
+        print(f'Best model has validation accuracy {best_val_loss:.3f} from {best_epoch}')
 
     def predict(self, inputs):
         self.eval()
@@ -200,12 +219,12 @@ class MCMCGAN:
                     # We reject these parameter values by returning probability 0.
                     return -np.inf
                 proposals[p].val = x[i]
-                print(f"{proposals[p].name}: {proposals[p].val}")
+                #print(f"{proposals[p].name}: {proposals[p].val}")
 
                 i += 1
 
         score = tf.convert_to_tensor(self.D(proposals), tf.float32)
-        tf.print(score)
+        #tf.print(score)
         return tf.math.log(score)
 
     def unnormalized_log_prob(self, x):
@@ -250,7 +269,7 @@ class MCMCGAN:
             mcmc = tfp.mcmc.NoUTurnSampler(
                 target_log_prob_fn=self.unnormalized_log_prob,
                 step_size=self.step_sizes,
-                max_tree_depth=15,
+                max_tree_depth=8,
                 max_energy_diff=1000.0,
             )
 
