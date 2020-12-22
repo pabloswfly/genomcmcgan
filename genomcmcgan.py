@@ -68,7 +68,7 @@ def run_genomcmcgan(
     valflow = torch.utils.data.DataLoader(valset, 32, True)
 
     # After wrappinf the cnn model with DataParallel, -.module.- is necessary
-    mcmcgan.discriminator.module.fit(trainflow, valflow, epochs, lr=0.0005)
+    mcmcgan.discriminator.module.fit(trainflow, valflow, epochs, lr=0.0001)
 
     # Initial guess must always be a float, otherwise with an int there are errors
     inferable_params = []
@@ -112,7 +112,7 @@ def run_genomcmcgan(
         step_sizes = stds
         # mcmcgan.step_sizes = tf.constant(np.sqrt(stds))
         mcmcgan.setup_mcmc(
-            num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1
+            num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 3
         )
 
         xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(

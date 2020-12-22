@@ -44,24 +44,24 @@ class Discriminator(nn.Module):
 
         # 1 because it is only 1 channel in a tensor (N, C, H, W)
         self.batch1 = nn.BatchNorm2d(1, eps=0.001, momentum=0.99)
-        self.conv1 = nn.Conv2d(
+        self.conv1 = nn.utils.weight_norm(nn.Conv2d(
             in_channels=1,
             out_channels=32,
             kernel_size=(1, 5),
             stride=(1, 2),
             padding=(0, 2),
-        )
+        ))
         self.batch2 = nn.BatchNorm2d(32, eps=0.001, momentum=0.99)
 
         self.symm1 = Symmetric("sum", 2)
 
-        self.conv2 = nn.Conv2d(
+        self.conv2 = nn.utils.weight_norm(nn.Conv2d(
             in_channels=32,
             out_channels=64,
             kernel_size=(1, 5),
             stride=(1, 2),
             padding=(0, 2),
-        )
+        ))
         self.batch3 = nn.BatchNorm2d(64, eps=0.001, momentum=0.99)
         self.dropout1 = nn.Dropout2d(0.5)
 
@@ -176,7 +176,7 @@ class MCMCGAN:
         self.seed = seed
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    def D(self, x, num_reps=100):
+    def D(self, x, num_reps=32):
         """
         Simulate with parameters `x`, then classify the simulations with the
         discriminator. Returns the average over `num_replicates` simulations.
@@ -250,7 +250,7 @@ class MCMCGAN:
             mcmc = tfp.mcmc.NoUTurnSampler(
                 target_log_prob_fn=self.unnormalized_log_prob,
                 step_size=self.step_sizes,
-                max_tree_depth=10,
+                max_tree_depth=15,
                 max_energy_diff=1000.0,
             )
 
@@ -295,7 +295,7 @@ class MCMCGAN:
 
         self.samples = samples.numpy()
         self.acceptance = is_accepted
-        with open('./results/samples.pkl', "wb") as obj:
+        with open("./results/samples.pkl", "wb") as obj:
             pickle.dump(samples.numpy(), obj, protocol=pickle.HIGHEST_PROTOCOL)
 
         return is_accepted, log_acc_r
@@ -352,8 +352,16 @@ class MCMCGAN:
         log = [p.plotlog for p in params]
         print(log)
 
-        g = sns.jointplot(x=self.samples[:, 0], y=self.samples[:, 1], kind="hist",
-                        bins=30, log_scale=log, height=10, ratio=3, space=0)
+        g = sns.jointplot(
+            x=self.samples[:, 0],
+            y=self.samples[:, 1],
+            kind="hist",
+            bins=30,
+            log_scale=log,
+            height=10,
+            ratio=3,
+            space=0,
+        )
         g.plot_joint(sns.kdeplot, color="k", zorder=1, levels=6, alpha=0.75)
         g.plot_marginals(sns.rugplot, color="r", height=-0.1, clip_on=False)
         plt.xlabel(params[0].name)

@@ -3,7 +3,15 @@ import numpy as np
 
 class Parameter:
     def __init__(
-        self, name, val, initial_guess, bounds, inferable, log=False, plotlog=False, **kwargs
+        self,
+        name,
+        val,
+        initial_guess,
+        bounds,
+        inferable,
+        log=False,
+        plotlog=False,
+        **kwargs
     ):
 
         self.name = name
