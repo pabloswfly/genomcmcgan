@@ -2,6 +2,7 @@ import copy
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+import pickle
 
 import torch
 import torch.nn as nn
@@ -14,7 +15,6 @@ if "TF_CPP_MIN_LOG_LEVEL" not in os.environ:
 
 import tensorflow as tf
 import tensorflow_probability as tfp
-
 
 
 class Symmetric(nn.Module):
@@ -38,21 +38,30 @@ class Symmetric(nn.Module):
         return out
 
 
-
 class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
 
         # 1 because it is only 1 channel in a tensor (N, C, H, W)
         self.batch1 = nn.BatchNorm2d(1, eps=0.001, momentum=0.99)
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=(1, 5),
-                            stride=(1, 2), padding=(0, 2))
+        self.conv1 = nn.Conv2d(
+            in_channels=1,
+            out_channels=32,
+            kernel_size=(1, 5),
+            stride=(1, 2),
+            padding=(0, 2),
+        )
         self.batch2 = nn.BatchNorm2d(32, eps=0.001, momentum=0.99)
 
         self.symm1 = Symmetric("sum", 2)
 
-        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(1, 5),
-                            stride=(1, 2), padding=(0, 2))
+        self.conv2 = nn.Conv2d(
+            in_channels=32,
+            out_channels=64,
+            kernel_size=(1, 5),
+            stride=(1, 2),
+            padding=(0, 2),
+        )
         self.batch3 = nn.BatchNorm2d(64, eps=0.001, momentum=0.99)
         self.dropout1 = nn.Dropout2d(0.5)
 
@@ -60,7 +69,6 @@ class Discriminator(nn.Module):
 
         self.fc1 = nn.Linear(64, 32)
         self.fc2 = nn.Linear(32, 1)
-
 
     # x represents our data
     def forward(self, x):
@@ -89,13 +97,11 @@ class Discriminator(nn.Module):
         output = torch.sigmoid(x)
         return output
 
-
     def weights_init(self, m):
         if isinstance(m, nn.Conv2d):
             torch.nn.init.xavier_uniform_(m.weight)
             if m.bias is not None:
                 torch.nn.init.zeros_(m.bias)
-
 
     def get_accuracy(self, y_true, y_prob):
 
@@ -104,12 +110,11 @@ class Discriminator(nn.Module):
         y_prob = y_prob > 0.5
         return (y_true == y_prob).sum().item() / y_true.size(0)
 
-
     def fit(self, trainflow, valflow, epochs, lr):
 
         optimizer = torch.optim.Adam(self.parameters(), lr)
         lossf = nn.BCELoss()
-        print('Initializing weights of the model')
+        print("Initializing weights of the model")
         self.apply(self.weights_init)
         self.train()
 
@@ -129,17 +134,29 @@ class Discriminator(nn.Module):
 
                 # print statistics
                 running_loss += loss.item()
-                if i % 20 == 19:    # print every 20 mini-batches
-                    print('[%d, %5d] loss: %.3f training acc: %.3f' %
-                          (epoch+1, i+1, running_loss/20, self.get_accuracy(labels, out)), end= "\r")
+                if i % 20 == 19:  # print every 20 mini-batches
+                    print(
+                        "[%d, %5d] loss: %.3f training acc: %.3f"
+                        % (
+                            epoch + 1,
+                            i + 1,
+                            running_loss / 20,
+                            self.get_accuracy(labels, out),
+                        ),
+                        end="\r",
+                    )
                     running_loss = 0.0
 
-            print('')
+            print("")
             with torch.no_grad():
                 for genmats, labels in valflow:
                     preds = self(genmats)
-                    print('[%d] validation acc: %.3f' % (epoch+1, self.get_accuracy(labels, preds)), end= "\r")
-            print('')
+                    print(
+                        "[%d] validation acc: %.3f"
+                        % (epoch + 1, self.get_accuracy(labels, preds)),
+                        end="\r",
+                    )
+            print("")
 
     def predict(self, inputs):
         self.eval()
@@ -194,7 +211,6 @@ class MCMCGAN:
     def unnormalized_log_prob(self, x):
         return tf.py_function(self._unnormalized_log_prob, inp=[x], Tout=tf.float32)
 
-
     def setup_mcmc(
         self,
         num_mcmc_results,
@@ -241,7 +257,7 @@ class MCMCGAN:
             self.mcmc_kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
                 mcmc,
                 num_adaptation_steps=int(self.num_burnin_steps * 0.8),
-                target_accept_prob=0.3,
+                target_accept_prob=0.70,
                 step_size_setter_fn=lambda pkr, new_step_size: pkr._replace(
                     step_size=new_step_size
                 ),
@@ -279,6 +295,8 @@ class MCMCGAN:
 
         self.samples = samples.numpy()
         self.acceptance = is_accepted
+        with open('./results/samples.pkl', "wb") as obj:
+            pickle.dump(samples.numpy(), obj, protocol=pickle.HIGHEST_PROTOCOL)
 
         return is_accepted, log_acc_r
 
@@ -331,16 +349,15 @@ class MCMCGAN:
 
     def jointplot_samples(self, params, it):
 
-        p1 = params[0]
-        p2 = params[1]
+        log = [p.plotlog for p in params]
+        print(log)
 
-        g = sns.jointplot(x=self.samples[:, 0], y=self.samples[:, 1], kind="kde")
-        g.plot_joint(sns.kdeplot, color="b", zorder=0, levels=6)
-        g.plot_marginals(sns.rugplot, color="r", height=-0.15, clip_on=False)
-        plt.xlim(p1.bounds)
-        plt.ylim(p2.bounds)
-        plt.xlabel(p1.name)
-        plt.ylabel(p2.name)
+        g = sns.jointplot(x=self.samples[:, 0], y=self.samples[:, 1], kind="hist",
+                        bins=30, log_scale=log, height=10, ratio=3, space=0)
+        g.plot_joint(sns.kdeplot, color="k", zorder=1, levels=6, alpha=0.75)
+        g.plot_marginals(sns.rugplot, color="r", height=-0.1, clip_on=False)
+        plt.xlabel(params[0].name)
+        plt.ylabel(params[1].name)
         plt.title(f"Jointplot at iteration {it}")
         plt.savefig(f"./results/jointplot_{it}.png")
         plt.clf()

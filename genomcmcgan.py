@@ -78,12 +78,12 @@ def run_genomcmcgan(
             inferable_params.append(p)
 
     initial_guesses = np.array([float(p.initial_guess) for p in inferable_params])
-    step_sizes = np.array([float(p.initial_guess*0.1) for p in inferable_params])
+    step_sizes = np.array([float(p.initial_guess * 0.1) for p in inferable_params])
     mcmcgan.setup_mcmc(
-        num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1
+        num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 2
     )
 
-    max_num_iters = 4
+    max_num_iters = 2
     convergence = False
     it = 1
 
@@ -134,7 +134,7 @@ def run_genomcmcgan(
         t = time.time() - start_t
         print(f"A single iteration of the MCMC-GAN took {t} seconds")
 
-    print(f"The estimates obtained after {it} iterations are:")
+    print(f"The estimates obtained after {it-1} iterations are:")
     print(means)
 
 

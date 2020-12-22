@@ -12,6 +12,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from parameter import Parameter
+import demography as dm
 
 _ex = None
 
@@ -24,6 +25,17 @@ def executor(p):
 
 
 def do_sim(args):
+
+    seed = args[5]
+    genob = args[0]
+    rng = random.Random(seed)
+    ts = dm.onepop_constant(args)
+
+    return genob._resize_from_ts(ts, rng)
+
+
+
+def do_sim_working(args):
     genob, params, randomize, i, proposals, seed = args
     rng = random.Random(seed)
 
@@ -793,8 +805,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     params_dict = OrderedDict()
 
-    params_dict["r"] = Parameter("r", 1.25e-9, 1e-8, (1e-11, 1e-7), inferable=True)
-    params_dict["mu"] = Parameter("mu", 1.25e-8, 1e-9, (1e-11, 1e-7), inferable=False)
+    params_dict["r"] = Parameter("r", 1.25e-9, 1e-8, (1e-11, 1e-7), inferable=True, plotlog=True)
+    params_dict["mu"] = Parameter("mu", 1.25e-8, 1e-9, (1e-11, 1e-7), inferable=False, plotlog=True)
     params_dict["Ne"] = Parameter("Ne", 10000, 14000, (5000, 15000), inferable=True)
 
     genob = Genobuilder(

@@ -3,7 +3,7 @@ import numpy as np
 
 class Parameter:
     def __init__(
-        self, name, val, initial_guess, bounds, inferable, log=False, **kwargs
+        self, name, val, initial_guess, bounds, inferable, log=False, plotlog=False, **kwargs
     ):
 
         self.name = name
@@ -13,6 +13,7 @@ class Parameter:
         self.log = log
         self.initial_guess = initial_guess
         self.inferable = inferable
+        self.plotlog = plotlog
         super(Parameter, self).__init__(**kwargs)
 
     @property
