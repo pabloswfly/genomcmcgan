@@ -382,7 +382,7 @@ class MCMCGAN:
             space=0,
         )
         g.plot_joint(sns.kdeplot, color="k", zorder=1, levels=6, alpha=0.75)
-        g.plot_marginals(sns.rugplot, color="r", height=-0.1, clip_on=False)
+        g.plot_marginals(sns.rugplot, color="r", height=-0.1, clip_on=False, alpha=0.1)
         plt.xlabel(params[0].name)
         plt.ylabel(params[1].name)
         plt.title(f"Jointplot at iteration {it}")

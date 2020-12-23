@@ -83,7 +83,7 @@ def run_genomcmcgan(
         num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 0
     )
 
-    max_num_iters = 2
+    max_num_iters = 5
     convergence = False
     it = 1
 
