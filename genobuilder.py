@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 import demography as dm
 from parameter import Parameter
+import demography as dm
 
 _ex = None
 
@@ -160,6 +161,34 @@ class Genobuilder:
             p = os.cpu_count()
         self._parallelism = p
 
+    def simulate_msprime_list(self, param_vals, seed=None):
+
+        sims = []
+        rng = random.Random(seed)
+
+        for p in param_vals:
+            sims.append(
+                msprime.simulate(
+                    sample_size=self.num_samples,
+                    Ne=self.params["Ne"].val,
+                    length=self.seq_len,
+                    mutation_rate=self.params["mu"].val,
+                    recombination_rate=p,
+                    random_seed=seed,
+                )
+            )
+
+        mat = np.zeros((self.num_reps, self.num_samples, self.fixed_dim))
+
+        # For each tree sequence output from the simulation
+        for i, ts in enumerate(sims):
+            mat[i] = self._resize_from_ts(ts, rng)
+
+        # Expand dimension by 1 (add channel dim). -1 stands for last axis.
+        mat = np.expand_dims(mat, axis=1)
+
+        return mat
+
     def simulate_msprime(self, params, randomize=False, proposals=False):
         """Simulate demographic data, returning a tensor with n_reps number
         of genotype matrices"""
@@ -180,7 +209,7 @@ class Genobuilder:
             print("time out!")
 
         # Expand dimension by 1 (add channel dim). -1 stands for last axis.
-        mat = np.expand_dims(mat, axis=-1)
+        mat = np.expand_dims(mat, axis=1)
 
         return mat
 
@@ -223,7 +252,7 @@ class Genobuilder:
 
             data[i] = self._resize_from_zarr(hap, relative_pos, alt_zarr)
 
-        data = np.expand_dims(data, axis=-1)
+        data = np.expand_dims(data, axis=1)
 
         return data
 
@@ -279,7 +308,7 @@ class Genobuilder:
                 mat[i] = self._resize_from_ts(ts, rng)
 
         # Expand dimension by 1 (add channel dim). -1 stands for last axis.
-        mat = np.expand_dims(mat, axis=-1)
+        mat = np.expand_dims(mat, axis=1)
 
         return mat
 
@@ -749,16 +778,21 @@ if __name__ == "__main__":
     args = parser.parse_args()
     params_dict = OrderedDict()
 
-    params_dict["r"] = Parameter("r", 2e-8, 1e-10, (1e-11, 1e-7), inferable=False)
-    params_dict["mu"] = Parameter("mu", 1.29e-8, 1e-9, (1e-10, 1e-7), inferable=False)
-    # params_dict["Ne"] = Parameter("Ne", 10000, 14000, (5000, 15000), inferable=True)
+
+    params_dict["r"] = Parameter(
+        "r", 1.25e-9, 1e-8, (1e-11, 1e-7), inferable=False, plotlog=True
+    )
+    params_dict["mu"] = Parameter(
+        "mu", 1.25e-8, 1e-9, (1e-11, 1e-7), inferable=False, plotlog=True
+    )
+    # params_dict["Ne"] = Parameter("Ne", 10000, 14000, (5000, 15000), inferable=False)
 
     # For onepop_exp model:
     params_dict["T1"] = Parameter("T1", 3000, 4000, (1500, 5000), inferable=True)
-    params_dict["N1"] = Parameter("N1", 10000, 20000, (1000, 30000), inferable=True)
-    params_dict["T2"] = Parameter("T2", 500, 1000, (100, 1500), inferable=False)
-    params_dict["N2"] = Parameter("N2", 5000, 20000, (1000, 20000), inferable=True)
-    params_dict["growth"] = Parameter("growth", 0.01, 0.02, (0, 0.05), inferable=True)
+    params_dict["N1"] = Parameter("N1", 10000, 20000, (1000, 30000), inferable=False)
+    params_dict["T2"] = Parameter("T2", 500, 1000, (100, 1500), inferable=True)
+    params_dict["N2"] = Parameter("N2", 5000, 20000, (1000, 20000), inferable=False)
+    params_dict["growth"] = Parameter("growth", 0.01, 0.02, (0, 0.05), inferable=False)
 
     # For onepop_migration model:
     """
