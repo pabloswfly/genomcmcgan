@@ -343,6 +343,8 @@ class MCMCGAN:
         # EXPAND COLORS FOR MORE PARAMETERS
         colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
         sns.set_style("darkgrid")
+        print(len(params))
+        print(self.samples.shape)
         for i, p in enumerate(params):
             plt.plot(self.samples[:, i], c=colors[i], alpha=0.3)
             plt.hlines(

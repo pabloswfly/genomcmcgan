@@ -47,6 +47,7 @@ def run_genomcmcgan(
     else:
         xtrain, xval, ytrain, yval = genob.generate_data(num_reps=1000)
 
+
     mcmcgan = MCMCGAN(genob, kernel_name, seed)
     mcmcgan.discriminator = Discriminator()
 
@@ -98,6 +99,7 @@ def run_genomcmcgan(
         # Draw traceplot and histogram of collected samples
         mcmcgan.traceplot_samples(inferable_params, it)
         mcmcgan.hist_samples(inferable_params, it)
+
         if mcmcgan.samples.shape[1] > 1:
             mcmcgan.jointplot_samples(inferable_params, it)
 
