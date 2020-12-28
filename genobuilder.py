@@ -786,6 +786,7 @@ if __name__ == "__main__":
     )
     # params_dict["Ne"] = Parameter("Ne", 10000, 14000, (5000, 15000), inferable=False)
 
+    # offset 0 - my bound
     # For onepop_exp model:
     params_dict["T1"] = Parameter("T1", 3000, 4000, (1500, 5000), inferable=True)
     params_dict["N1"] = Parameter("N1", 10000, 20000, (1000, 30000), inferable=False)

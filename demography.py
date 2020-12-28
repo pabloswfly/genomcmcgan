@@ -61,6 +61,7 @@ def onepop_exp(args):
         msprime.PopulationParametersChange(time=T2, initial_size=N2, growth_rate=0),
         msprime.PopulationParametersChange(time=T1, initial_size=N1),
     ]
+    # T2 + T1 
 
     ts = msprime.simulate(
         sample_size=genob.num_samples,

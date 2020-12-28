@@ -247,6 +247,7 @@ class MCMCGAN:
         self.step_sizes = tf.constant(step_sizes, tf.float32)
         self.steps_between_results = steps_between_results
         self.samples = None
+        self.stats = None
 
         if self.kernel_name not in ["hmc", "nuts"]:
             raise NameError("kernel value must be either hmc or nuts")
@@ -274,7 +275,7 @@ class MCMCGAN:
             )
 
             self.mcmc_kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
-                mcmc,
+                inner_kernel=mcmc,
                 num_adaptation_steps=int(self.num_burnin_steps * 0.8),
                 target_accept_prob=0.70,
                 step_size_setter_fn=lambda pkr, new_step_size: pkr._replace(
@@ -284,6 +285,27 @@ class MCMCGAN:
                 log_accept_prob_getter_fn=lambda pkr: pkr.log_accept_ratio,
             )
 
+
+    def trace_fn_nuts(self, _, pkr):
+        return (
+            #pkr.inner_results.accepted_results.target_log_prob,
+            pkr.inner_results.target_log_prob,
+            pkr.inner_results.leapfrogs_taken,
+            pkr.inner_results.has_divergence,
+            pkr.inner_results.energy,
+            pkr.inner_results.is_accepted,
+            pkr.inner_results.log_accept_ratio
+            )
+
+    def trace_fn_hmc(self, _, pkr):
+        return (
+            pkr.inner_results.accepted_results.target_log_prob,
+            ~(pkr.inner_results.log_accept_ratio > -1000.),
+            pkr.inner_results.is_accepted,
+            pkr.inner_results.accepted_results.step_size,
+            )
+
+
     # Run the chain (with burn-in).
     # autograph=False is recommended by the TFP team. It is related to how
     # control-flow statements are handled.
@@ -291,33 +313,44 @@ class MCMCGAN:
     @tf.function(autograph=False, experimental_compile=True)
     def run_chain(self):
 
-        is_accepted = None
-        log_acc_r = None
+        trace_fn = self.trace_fn_nuts if self.kernel_name=='nuts' else self.trace_fn_hmc
         tf_seed = tf.constant(self.seed)
         print(f"Selected mcmc kernel is {self.kernel_name}")
 
-        samples, [is_accepted, log_acc_rat] = tfp.mcmc.sample_chain(
+        samples, stats = tfp.mcmc.sample_chain(
             num_results=self.num_mcmc_results,
             num_burnin_steps=self.num_burnin_steps,
             current_state=self.initial_guess,
             kernel=self.mcmc_kernel,
             seed=tf_seed,
             num_steps_between_results=self.steps_between_results,
-            trace_fn=lambda _, pkr: [
-                pkr.inner_results.is_accepted,
-                pkr.inner_results.log_accept_ratio,
-            ],
+            trace_fn=trace_fn
         )
 
-        is_accepted = tf.reduce_mean(tf.cast(is_accepted, dtype=tf.float32))
-        log_acc_r = tf.reduce_mean(tf.cast(log_acc_rat, dtype=tf.float32))
-
         self.samples = samples.numpy()
-        self.acceptance = is_accepted
-        with open("./results/samples.pkl", "wb") as obj:
-            pickle.dump(samples.numpy(), obj, protocol=pickle.HIGHEST_PROTOCOL)
+        self.stats = [s.numpy() for s in stats]
+        pack = [self.samples, self.stats]
+        with open("./results/output.pkl", "wb") as obj:
+            pickle.dump(pack, obj, protocol=pickle.HIGHEST_PROTOCOL)
 
-        return is_accepted, log_acc_r
+
+
+    def result_to_stats(self, params):
+
+        if self.kernel_name=='hmc':
+            stats_names = ['logprob', 'diverging', 'acceptance', 'step_size']
+            sample_stats = {k:v.T for k, v in zip(stats_names, self.stats)}
+
+        elif self.kernel_name=='nuts':
+            stats_names = ['logprob', 'tree_size', 'diverging', 'energy', 'acceptance', 'mean_tree_accept']
+            sample_stats = {k:v.T for k, v in zip(stats_names, self.stats)}
+            #sample_stats['tree_size'] = np.diff(sample_stats['tree_size'], axis=1)
+
+        var_names = [p.name for p in params]
+        posterior = {k:v for k, v in zip(var_names, self.samples.T)}
+
+        return posterior, sample_stats
+
 
     def hist_samples(self, params, it, bins=10):
 
@@ -357,8 +390,7 @@ class MCMCGAN:
             plt.xlabel("Accepted samples")
             plt.ylabel("Values")
             plt.title(
-                f"Trace plot of {self.kernel_name} samples for {p.name}"
-                f" at {it}. Acc. rate: {self.acceptance:.3f}"
+                f"Trace plot of {self.kernel_name} samples for {p.name} at {it}."
             )
             plt.savefig(
                 f"./results/mcmcgan_{self.kernel_name}_traceplot_it{it}"

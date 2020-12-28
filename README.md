@@ -62,11 +62,11 @@ The different arguments and flags are:
 
 - **-m/--discriminator-model:** Path to a cnn model to load as the discriminator of the MCMC-GAN as an .hdf5 file.
 
-- **-e/--epochs:** Number of epochs to train the discriminator on real and fake data on each iteration of MCMCGAN.
+- **-e/--epochs:** Number of epochs to train the discriminator on real and fake data on each iteration of MCMCGAN. Default is 30.
 
-- **-n/--num-mcmc-samples:** Number of MCMC samples to collect in each training iteration of MCMCGAN.
+- **-n/--num-mcmc-samples:** Number of MCMC samples to collect in each training iteration of MCMCGAN. Default is 3,000.
 
-- **-n/--num-mcmc-burnin:** Number of MCMC burn-in steps in each training iteration of MCMCGAN.
+- **-n/--num-mcmc-burnin:** Number of MCMC burn-in steps in each training iteration of MCMCGAN. Default is 500.
 
 - **-se/--seed:** Seed for stochastic parts of the algorithm for reproducibility.
 

@@ -13,6 +13,7 @@ import time
 import argparse
 import torch
 import torch.nn as nn
+import arviz as az
 import numpy as np
 from mcmcgan import MCMCGAN, Discriminator
 from genobuilder import Genobuilder
@@ -92,8 +93,11 @@ def run_genomcmcgan(
         print(f"Starting the MCMC sampling chain for iteration {it}")
         start_t = time.time()
 
-        is_accepted, log_acc_rate = mcmcgan.run_chain()
-        print(f"Is accepted: {is_accepted}, acc_rate: {log_acc_rate}")
+        mcmcgan.run_chain()
+        posterior, sample_stats = mcmcgan.result_to_stats(inferable_params)
+        az_trace = az.from_dict(posterior=posterior, sample_stats=sample_stats)
+        az.plot_trace(az_trace, compact=True, divergences=False)
+
 
         # Draw traceplot and histogram of collected samples
         mcmcgan.traceplot_samples(inferable_params, it)
