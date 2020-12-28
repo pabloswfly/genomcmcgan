@@ -27,6 +27,7 @@ def run_genomcmcgan(
     epochs,
     num_mcmc_samples,
     num_mcmc_burnin,
+    num_chains,
     seed,
     parallelism,
 ):
@@ -76,12 +77,13 @@ def run_genomcmcgan(
     for p in mcmcgan.genob.params.values():
         print(f"{p.name} inferable: {p.inferable}")
         if p.inferable:
+            p.initial_guess = np.random.uniform(p.bounds[0], p.bounds[1], num_chains)
             inferable_params.append(p)
 
-    initial_guesses = np.array([float(p.initial_guess) for p in inferable_params])
-    step_sizes = np.array([float(p.initial_guess * 0.1) for p in inferable_params])
+    inits = [p.initial_guess for p in inferable_params]
+    step_sizes = [(np.mean(p.initial_guess) * 0.1) for p in inferable_params]
     mcmcgan.setup_mcmc(
-        num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 0
+        num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 0
     )
 
     max_num_iters = 5
@@ -112,11 +114,11 @@ def run_genomcmcgan(
         stds = np.std(mcmcgan.samples, axis=0)
         for j, p in enumerate(inferable_params):
             print(f"{p.name} samples with mean {means[j]} and std {stds[j]}")
-        initial_guesses = means
+        inits = means
         step_sizes = stds
         # mcmcgan.step_sizes = tf.constant(np.sqrt(stds))
         mcmcgan.setup_mcmc(
-            num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 3
+            num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 3
         )
 
         xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(
@@ -204,6 +206,14 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "-c",
+        "--num-chains",
+        help="Number of parallel Markov chains running during the sampling steps",
+        type=int,
+        default=10,
+    )
+
+    parser.add_argument(
         "-se",
         "--seed",
         help="Seed for stochastic parts of the algorithm for reproducibility",
@@ -230,6 +240,7 @@ if __name__ == "__main__":
         args.epochs,
         args.num_mcmc_samples,
         args.num_mcmc_burnin,
+        args.num_chains,
         args.seed,
         args.parallelism,
     )

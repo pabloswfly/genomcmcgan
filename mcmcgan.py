@@ -208,33 +208,35 @@ class MCMCGAN:
 
     # Where `D(x)` is the average discriminator output from n independent
     # simulations (which are simulated with parameters `x`).
-    def _unnormalized_log_prob(self, x):
+    def _unnormalized_log_prob(self, *x):
 
         proposals = copy.deepcopy(self.genob.params)
-        i = 0
-        x = x.numpy()
-        for p in proposals:
-            if proposals[p].inferable:
-                if not (proposals[p].bounds[0] < x[i] < proposals[p].bounds[1]):
-                    # We reject these parameter values by returning probability 0.
-                    return -np.inf
-                proposals[p].val = x[i]
-                #print(f"{proposals[p].name}: {proposals[p].val}")
+        scores = []
+        for chain in zip(*x):
+            i = 0
+            print(chain)
+            for p in proposals:
+                if proposals[p].inferable:
+                    if not (proposals[p].bounds[0] < chain[i] < proposals[p].bounds[1]):
+                        # We reject these parameter values by returning probability 0.
+                        return -np.inf
+                    proposals[p].val = chain[i]
+                    #print(f"{proposals[p].name}: {proposals[p].val}")
 
-                i += 1
+                    i += 1
+            scores.append(self.D(proposals))
 
-        score = tf.convert_to_tensor(self.D(proposals), tf.float32)
-        #tf.print(score)
-        return tf.math.log(score)
+        print(scores)
+        return [tf.math.log(tf.convert_to_tensor(scores, tf.float32))]
 
-    def unnormalized_log_prob(self, x):
-        return tf.py_function(self._unnormalized_log_prob, inp=[x], Tout=tf.float32)
+    def unnormalized_log_prob(self, *x):
+        return tf.py_function(self._unnormalized_log_prob, inp=[*x], Tout=tf.float32)
 
     def setup_mcmc(
         self,
         num_mcmc_results,
         num_burnin_steps,
-        initial_guess,
+        inits,
         step_sizes,
         steps_between_results,
     ):
@@ -243,8 +245,8 @@ class MCMCGAN:
         # Initialize the HMC transition kernel.
         self.num_mcmc_results = num_mcmc_results
         self.num_burnin_steps = num_burnin_steps
-        self.initial_guess = tf.constant(initial_guess, tf.float32)
-        self.step_sizes = tf.constant(step_sizes, tf.float32)
+        self.inits = [tf.constant(i, tf.float32) for i in inits]
+        self.step_sizes = [tf.constant(s, tf.float32) for s in step_sizes]
         self.steps_between_results = steps_between_results
         self.samples = None
         self.stats = None
@@ -320,7 +322,7 @@ class MCMCGAN:
         samples, stats = tfp.mcmc.sample_chain(
             num_results=self.num_mcmc_results,
             num_burnin_steps=self.num_burnin_steps,
-            current_state=self.initial_guess,
+            current_state=self.inits,
             kernel=self.mcmc_kernel,
             seed=tf_seed,
             num_steps_between_results=self.steps_between_results,
