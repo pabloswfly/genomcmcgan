@@ -112,7 +112,7 @@ def run_genomcmcgan(
         step_sizes = stds
         # mcmcgan.step_sizes = tf.constant(np.sqrt(stds))
         mcmcgan.setup_mcmc(
-            num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 3
+            num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 0
         )
 
         xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(

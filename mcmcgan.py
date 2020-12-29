@@ -175,7 +175,7 @@ class Discriminator(nn.Module):
             print("")
 
         self.load_state_dict(best_model)
-        print(f'Best model has validation accuracy {best_val_loss:.3f} from {best_epoch}')
+        print(f'Best model has validation loss {best_val_loss:.3f} from {best_epoch}')
 
     def predict(self, inputs):
         self.eval()
