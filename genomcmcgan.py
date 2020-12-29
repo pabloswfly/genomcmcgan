@@ -13,6 +13,7 @@ import time
 import argparse
 import torch
 import torch.nn as nn
+import arviz as az
 import numpy as np
 from mcmcgan import MCMCGAN, Discriminator
 from genobuilder import Genobuilder
@@ -77,10 +78,10 @@ def run_genomcmcgan(
         if p.inferable:
             inferable_params.append(p)
 
-    initial_guesses = np.array([float(p.initial_guess) for p in inferable_params])
-    step_sizes = np.array([float(p.initial_guess * 0.1) for p in inferable_params])
+    inits = [p.initial_guess for p in inferable_params]
+    step_sizes = [(p.initial_guess*0.1) for p in inferable_params]
     mcmcgan.setup_mcmc(
-        num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 0
+        num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 1
     )
 
     max_num_iters = 5
@@ -92,8 +93,10 @@ def run_genomcmcgan(
         print(f"Starting the MCMC sampling chain for iteration {it}")
         start_t = time.time()
 
-        is_accepted, log_acc_rate = mcmcgan.run_chain()
-        print(f"Is accepted: {is_accepted}, acc_rate: {log_acc_rate}")
+        mcmcgan.run_chain()
+        posterior, sample_stats = mcmcgan.result_to_stats(inferable_params)
+        az_trace = az.from_dict(posterior=posterior, sample_stats=sample_stats)
+        az.plot_trace(az_trace, compact=True, divergences=False)
 
         # Draw traceplot and histogram of collected samples
         mcmcgan.traceplot_samples(inferable_params, it)
@@ -108,11 +111,11 @@ def run_genomcmcgan(
         stds = np.std(mcmcgan.samples, axis=0)
         for j, p in enumerate(inferable_params):
             print(f"{p.name} samples with mean {means[j]} and std {stds[j]}")
-        initial_guesses = means
+        inits = means
         step_sizes = stds
         # mcmcgan.step_sizes = tf.constant(np.sqrt(stds))
         mcmcgan.setup_mcmc(
-            num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 0
+            num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 1
         )
 
         xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(
