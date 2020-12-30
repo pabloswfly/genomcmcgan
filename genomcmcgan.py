@@ -18,7 +18,6 @@ import numpy as np
 from mcmcgan import MCMCGAN, Discriminator
 from genobuilder import Genobuilder
 
-
 def run_genomcmcgan(
     genobuilder,
     kernel_name,

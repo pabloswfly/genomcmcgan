@@ -356,6 +356,7 @@ class MCMCGAN:
 
         colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
         sns.set_style("darkgrid")
+        plt.clf()
         for i, p in enumerate(params):
             sns.distplot(self.samples[:, i], color=colors[i])
             ymax = plt.ylim()[1]
@@ -376,6 +377,7 @@ class MCMCGAN:
         # EXPAND COLORS FOR MORE PARAMETERS
         colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
         sns.set_style("darkgrid")
+        plt.clf()
         for i, p in enumerate(params):
             plt.plot(self.samples[:, i], c=colors[i], alpha=0.3)
             plt.hlines(
@@ -401,7 +403,7 @@ class MCMCGAN:
     def jointplot_samples(self, params, it):
 
         log = [p.plotlog for p in params]
-        print(log)
+        plt.clf()
 
         g = sns.jointplot(
             x=self.samples[:, 0],
