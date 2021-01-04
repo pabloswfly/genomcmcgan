@@ -214,20 +214,19 @@ class MCMCGAN:
         scores = []
         for chain in zip(*x):
             i = 0
-            print(chain)
             for p in proposals:
                 if proposals[p].inferable:
-                    if not (proposals[p].bounds[0] < chain[i] < proposals[p].bounds[1]):
+                    if not (proposals[p].bounds[0] < chain[i].numpy() < proposals[p].bounds[1]):
                         # We reject these parameter values by returning probability 0.
                         return -np.inf
-                    proposals[p].val = chain[i]
+                    proposals[p].val = chain[i].numpy()
                     #print(f"{proposals[p].name}: {proposals[p].val}")
 
                     i += 1
             scores.append(self.D(proposals))
 
-        print(scores)
-        return [tf.math.log(tf.convert_to_tensor(scores, tf.float32))]
+        tf.print(scores)
+        return tf.math.log(tf.convert_to_tensor(scores, tf.float32))
 
     def unnormalized_log_prob(self, *x):
         return tf.py_function(self._unnormalized_log_prob, inp=[*x], Tout=tf.float32)
@@ -245,8 +244,8 @@ class MCMCGAN:
         # Initialize the HMC transition kernel.
         self.num_mcmc_results = num_mcmc_results
         self.num_burnin_steps = num_burnin_steps
-        self.inits = [tf.constant(i, tf.float32) for i in inits]
-        self.step_sizes = [tf.constant(s, tf.float32) for s in step_sizes]
+        self.inits = [tf.convert_to_tensor(i, tf.float32) for i in inits]
+        self.step_sizes = [tf.convert_to_tensor(s, tf.float32) for s in step_sizes]
         self.steps_between_results = steps_between_results
         self.samples = None
         self.stats = None
