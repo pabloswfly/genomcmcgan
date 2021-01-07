@@ -550,25 +550,6 @@ class Genobuilder:
         return
 
 
-def filter_maf(gt, pos, maf):
-    """Filter a genotype matrix gt and the SNP position vector pos in base of
-    the desired Minor Allele Frequency maf parameter"""
-
-    # Filter alleles and position where af > maf_threshold i.e. 0.05
-    af = np.mean(gt, axis=1)
-    condition = af > maf
-    gt = gt[np.array(condition), :]
-    pos = pos[condition]
-
-    # Filter alleles and position where af > 1 - maf_threshold i.e. 0.95
-    af = np.mean(gt, axis=1)
-    condition = af < 1 - maf
-    gt = gt[np.array(condition), :]
-    pos = pos[condition]
-
-    return gt, pos
-
-
 def load_mask(mask_file, min_len):
     """Given a mask file in BED format, parse the mask data and
     returns a matrix of tuples containing the permited regions,
@@ -643,49 +624,6 @@ def locate(sorted_idx, start=None, stop=None):
     )
 
     return slice(start_idx, stop_idx)
-
-
-def samples_from_population(pop_file):
-    """Return a list of sample IDs given a population file from the
-    online repository of 1000 genomes project"""
-
-    population = np.loadtxt(pop_file, dtype=str, delimiter="\t", skiprows=1)
-
-    return population[:, 0]
-
-
-def vcf2zarr(vcf_files, pop_file, zarr_path):
-    # Two veery good tutorials:
-    # http://alimanfoo.github.io/2018/04/09/selecting-variants.html
-    # http://alimanfoo.github.io/2017/06/14/read-vcf.html
-    # TODO: Refactor to work without pysam and allel
-
-    # Get a list of the wanted samples from one population
-    # which are found in the VCF files
-    # The files must be numbered, and that number must be substituted
-    # in the input path string with {n}.
-    import pysam
-    import allel
-
-    first_vcf = pysam.VariantFile(vcf_files.replace("{n}", "1"))
-    wanted_samples = samples_from_population(pop_file)
-    found_samples = list(
-        set(wanted_samples).intersection(list(first_vcf.header.samples))
-    )
-
-    # Create one zarr folder for each chromosome
-    for chrom in range(1, 23):
-        vcf = vcf_files.replace("{n}", str(chrom))
-        print(f"Creating zarr object for chromosome {chrom}")
-        allel.vcf_to_zarr(
-            vcf,
-            zarr_path,
-            group=str(chrom),
-            region=str(chrom),
-            fields=["POS", "ALT", "samples", "GT"],
-            samples=found_samples,
-            overwrite=True,
-        )
 
 
 # ------------------------------------------------------------------------------
@@ -779,7 +717,7 @@ if __name__ == "__main__":
     params_dict = OrderedDict()
 
     params_dict["r"] = Parameter(
-        "r", 1.25e-9, 1e-8, (1e-11, 1e-7), inferable=False, plotlog=True
+        "r", 1.25e-8, 1e-9, (1e-10, 1e-7), inferable=False, plotlog=True
     )
     params_dict["mu"] = Parameter(
         "mu", 1.25e-8, 1e-9, (1e-11, 1e-7), inferable=False, plotlog=True
@@ -789,10 +727,10 @@ if __name__ == "__main__":
     # offset 0 - my bound
     # For onepop_exp model:
     params_dict["T1"] = Parameter("T1", 3000, 4000, (1500, 5000), inferable=True)
-    params_dict["N1"] = Parameter("N1", 10000, 20000, (1000, 30000), inferable=False)
-    params_dict["T2"] = Parameter("T2", 500, 1000, (100, 1500), inferable=True)
-    params_dict["N2"] = Parameter("N2", 5000, 20000, (1000, 20000), inferable=False)
-    params_dict["growth"] = Parameter("growth", 0.01, 0.02, (0, 0.05), inferable=False)
+    params_dict["N1"] = Parameter("N1", 10000, 20000, (1000, 30000), inferable=True)
+    params_dict["T2"] = Parameter("T2", 500, 1000, (100, 1500), inferable=False)
+    params_dict["N2"] = Parameter("N2", 5000, 20000, (1000, 30000), inferable=True)
+    params_dict["growth"] = Parameter("growth", 0.01, 0.02, (0, 0.05), inferable=True)
 
     # For onepop_migration model:
     """
