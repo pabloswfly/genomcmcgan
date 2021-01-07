@@ -53,7 +53,7 @@ def onepop_exp(args):
             params[p].rand() if randomize else params[p].val for p in necessary_params
         ]
 
-    N0 = N2 / math.exp(growth * T2)
+    N0 = N2 / math.exp(-growth * T2)
 
     # Time is given in generations unit (t/25)
     demographic_events = [
