@@ -53,7 +53,7 @@ class Discriminator(nn.Module):
         )
         self.batch2 = nn.BatchNorm2d(64, eps=0.001, momentum=0.99)
 
-        self.symm1 = Symmetric("sum", 2)
+        self.symm1 = Symmetric("mean", 2)
 
         self.conv2 = nn.Conv2d(
             in_channels=64,
@@ -65,7 +65,7 @@ class Discriminator(nn.Module):
         self.batch3 = nn.BatchNorm2d(128, eps=0.001, momentum=0.99)
         self.dropout1 = nn.Dropout2d(0.5)
 
-        self.symm2 = Symmetric("sum", 3)
+        self.symm2 = Symmetric("mean", 3)
 
         self.fc1 = nn.Linear(128, 64)
         self.fc2 = nn.Linear(64, 32)
@@ -117,7 +117,7 @@ class Discriminator(nn.Module):
 
         optimizer = torch.optim.Adam(self.parameters(), lr)
         lossf = nn.BCELoss()
-        best_val_loss = 1.
+        best_val_loss = 1.0
 
         print("Initializing weights of the model")
         self.apply(self.weights_init)
@@ -175,7 +175,7 @@ class Discriminator(nn.Module):
             print("")
 
         self.load_state_dict(best_model)
-        print(f'Best model has validation loss {best_val_loss:.3f} from {best_epoch}')
+        print(f"Best model has validation loss {best_val_loss:.3f} from {best_epoch}")
 
     def predict(self, inputs):
         self.eval()
@@ -219,12 +219,12 @@ class MCMCGAN:
                     # We reject these parameter values by returning probability 0.
                     return -np.inf
                 proposals[p].val = x[i]
-                #print(f"{proposals[p].name}: {proposals[p].val}")
+                # print(f"{proposals[p].name}: {proposals[p].val}")
 
                 i += 1
 
         score = tf.convert_to_tensor(self.D(proposals), tf.float32)
-        #tf.print(score)
+        # tf.print(score)
         return tf.math.log(score)
 
     def unnormalized_log_prob(self, x):
@@ -246,6 +246,7 @@ class MCMCGAN:
         self.inits = tf.constant(inits, tf.float32)
         self.step_sizes = tf.constant(step_sizes, tf.float32)
         self.steps_between_results = steps_between_results
+        self.iter = 0
         self.samples = None
         self.stats = None
 
@@ -285,26 +286,24 @@ class MCMCGAN:
                 log_accept_prob_getter_fn=lambda pkr: pkr.log_accept_ratio,
             )
 
-
     def trace_fn_nuts(self, _, pkr):
         return (
-            #pkr.inner_results.accepted_results.target_log_prob,
-            pkr.inner_results.target_log_prob,
-            pkr.inner_results.leapfrogs_taken,
-            pkr.inner_results.has_divergence,
-            pkr.inner_results.energy,
-            pkr.inner_results.is_accepted,
-            pkr.inner_results.log_accept_ratio
-            )
+            # pkr.inner_results.accepted_results.target_log_prob,
+            pkr.inner_results.inner_results.target_log_prob,
+            pkr.inner_results.inner_results.leapfrogs_taken,
+            pkr.inner_results.inner_results.has_divergence,
+            pkr.inner_results.inner_results.energy,
+            pkr.inner_results.inner_results.is_accepted,
+            pkr.inner_results.inner_results.log_accept_ratio,
+        )
 
     def trace_fn_hmc(self, _, pkr):
         return (
-            pkr.inner_results.accepted_results.target_log_prob,
-            ~(pkr.inner_results.log_accept_ratio > -1000.),
-            pkr.inner_results.is_accepted,
-            pkr.inner_results.accepted_results.step_size,
-            )
-
+            pkr.inner_results.inner_results.accepted_results.target_log_prob,
+            ~(pkr.inner_results.inner_results.log_accept_ratio > -1000.0),
+            pkr.inner_results.inner_results.is_accepted,
+            pkr.inner_results.inner_results.accepted_results.step_size,
+        )
 
     # Run the chain (with burn-in).
     # autograph=False is recommended by the TFP team. It is related to how
@@ -313,8 +312,12 @@ class MCMCGAN:
     @tf.function(autograph=False, experimental_compile=True)
     def run_chain(self):
 
-        trace_fn = self.trace_fn_nuts if self.kernel_name=='nuts' else self.trace_fn_hmc
+        trace_fn = (
+            self.trace_fn_nuts if self.kernel_name == "nuts" else self.trace_fn_hmc
+        )
         tf_seed = tf.constant(self.seed)
+        pbar = tfp.experimental.mcmc.ProgressBarReducer(self.num_mcmc_results)
+        self.mcmc_kernel = tfp.experimental.mcmc.WithReductions(self.mcmc_kernel, pbar)
         print(f"Selected mcmc kernel is {self.kernel_name}")
 
         samples, stats = tfp.mcmc.sample_chain(
@@ -324,35 +327,40 @@ class MCMCGAN:
             kernel=self.mcmc_kernel,
             seed=tf_seed,
             num_steps_between_results=self.steps_between_results,
-            trace_fn=trace_fn
+            trace_fn=trace_fn,
         )
 
+        pbar.bar.close()
         self.samples = samples.numpy()
         self.stats = [s.numpy() for s in stats]
         pack = [self.samples, self.stats]
-        with open("./results/output.pkl", "wb") as obj:
+        with open(f"./results/output_it{self.iter}.pkl", "wb") as obj:
             pickle.dump(pack, obj, protocol=pickle.HIGHEST_PROTOCOL)
-
-
 
     def result_to_stats(self, params):
 
-        if self.kernel_name=='hmc':
-            stats_names = ['logprob', 'diverging', 'acceptance', 'step_size']
-            sample_stats = {k:v.T for k, v in zip(stats_names, self.stats)}
+        if self.kernel_name == "hmc":
+            stats_names = ["logprob", "diverging", "acceptance", "step_size"]
+            sample_stats = {k: v.T for k, v in zip(stats_names, self.stats)}
 
-        elif self.kernel_name=='nuts':
-            stats_names = ['logprob', 'tree_size', 'diverging', 'energy', 'acceptance', 'mean_tree_accept']
-            sample_stats = {k:v.T for k, v in zip(stats_names, self.stats)}
-            #sample_stats['tree_size'] = np.diff(sample_stats['tree_size'], axis=1)
+        elif self.kernel_name == "nuts":
+            stats_names = [
+                "logprob",
+                "tree_size",
+                "diverging",
+                "energy",
+                "acceptance",
+                "mean_tree_accept",
+            ]
+            sample_stats = {k: v.T for k, v in zip(stats_names, self.stats)}
+            # sample_stats['tree_size'] = np.diff(sample_stats['tree_size'], axis=1)
 
         var_names = [p.name for p in params]
-        posterior = {k:v for k, v in zip(var_names, self.samples.T)}
+        posterior = {k: v for k, v in zip(var_names, self.samples.T)}
 
         return posterior, sample_stats
 
-
-    def hist_samples(self, params, it, bins=10):
+    def hist_samples(self, params, bins=10):
 
         colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
         sns.set_style("darkgrid")
@@ -365,14 +373,16 @@ class MCMCGAN:
             plt.legend([p.name])
             plt.xlabel("Values")
             plt.ylabel("Density")
-            plt.title(f"{self.kernel_name} samples for {p.name} at iteration {it}")
+            plt.title(
+                f"{self.kernel_name} samples for {p.name} at iteration {self.iter}"
+            )
             plt.savefig(
-                f"./results/mcmcgan_{self.kernel_name}_histogram_it{it}"
+                f"./results/mcmcgan_{self.kernel_name}_histogram_it{self.iter}"
                 f"_{p.name}.png"
             )
             plt.clf()
 
-    def traceplot_samples(self, params, it):
+    def traceplot_samples(self, params):
 
         # EXPAND COLORS FOR MORE PARAMETERS
         colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
@@ -392,15 +402,15 @@ class MCMCGAN:
             plt.xlabel("Accepted samples")
             plt.ylabel("Values")
             plt.title(
-                f"Trace plot of {self.kernel_name} samples for {p.name} at {it}."
+                f"Trace plot of {self.kernel_name} samples for {p.name} at {self.iter}."
             )
             plt.savefig(
-                f"./results/mcmcgan_{self.kernel_name}_traceplot_it{it}"
+                f"./results/mcmcgan_{self.kernel_name}_traceplot_it{self.iter}"
                 f"_{p.name}.png"
             )
             plt.clf()
 
-    def jointplot_samples(self, params, it):
+    def jointplot_samples(self, params):
 
         log = [p.plotlog for p in params]
         plt.clf()
@@ -410,7 +420,7 @@ class MCMCGAN:
             y=self.samples[:, 1],
             kind="hist",
             bins=30,
-            log_scale=log,
+            log_scale=log[:2],
             height=10,
             ratio=3,
             space=0,
@@ -419,6 +429,6 @@ class MCMCGAN:
         g.plot_marginals(sns.rugplot, color="r", height=-0.1, clip_on=False, alpha=0.1)
         plt.xlabel(params[0].name)
         plt.ylabel(params[1].name)
-        plt.title(f"Jointplot at iteration {it}")
-        plt.savefig(f"./results/jointplot_{it}.png")
+        plt.title(f"Jointplot at iteration {self.iter}")
+        plt.savefig(f"./results/jointplot_{self.iter}.png")
         plt.clf()

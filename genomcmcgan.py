@@ -18,6 +18,7 @@ import numpy as np
 from mcmcgan import MCMCGAN, Discriminator
 from genobuilder import Genobuilder
 
+
 def run_genomcmcgan(
     genobuilder,
     kernel_name,
@@ -78,18 +79,16 @@ def run_genomcmcgan(
             inferable_params.append(p)
 
     inits = [p.initial_guess for p in inferable_params]
-    step_sizes = [(p.initial_guess*0.1) for p in inferable_params]
-    mcmcgan.setup_mcmc(
-        num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 1
-    )
+    step_sizes = [(p.initial_guess * 0.1) for p in inferable_params]
+    mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 1)
 
     max_num_iters = 5
     convergence = False
-    it = 1
+    mcmcgan.iter = 1
 
-    while not convergence and max_num_iters != it:
+    while not convergence and max_num_iters != mcmcgan.iter:
 
-        print(f"Starting the MCMC sampling chain for iteration {it}")
+        print(f"Starting the MCMC sampling chain for iteration {mcmcgan.iter}")
         start_t = time.time()
 
         mcmcgan.run_chain()
@@ -98,10 +97,10 @@ def run_genomcmcgan(
         az.plot_trace(az_trace, compact=True, divergences=False)
 
         # Draw traceplot and histogram of collected samples
-        mcmcgan.traceplot_samples(inferable_params, it)
-        mcmcgan.hist_samples(inferable_params, it)
+        mcmcgan.traceplot_samples(inferable_params)
+        mcmcgan.hist_samples(inferable_params)
         if mcmcgan.samples.shape[1] > 1:
-            mcmcgan.jointplot_samples(inferable_params, it)
+            mcmcgan.jointplot_samples(inferable_params)
 
         for i, p in enumerate(inferable_params):
             p.proposals = mcmcgan.samples[:, i]
@@ -113,9 +112,7 @@ def run_genomcmcgan(
         inits = means
         step_sizes = stds
         # mcmcgan.step_sizes = tf.constant(np.sqrt(stds))
-        mcmcgan.setup_mcmc(
-            num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 1
-        )
+        mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 1)
 
         xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(
             num_mcmc_samples, proposals=True
@@ -132,11 +129,11 @@ def run_genomcmcgan(
 
         mcmcgan.discriminator.module.fit(trainflow, valflow, epochs, lr=0.0002)
 
-        it += 1
+        mcmcgan.iter += 1
         t = time.time() - start_t
         print(f"A single iteration of the MCMC-GAN took {t} seconds")
 
-    print(f"The estimates obtained after {it-1} iterations are:")
+    print(f"The estimates obtained after {mcmcgan.iter} iterations are:")
     print(means)
 
 
