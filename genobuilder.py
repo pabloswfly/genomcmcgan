@@ -1,7 +1,6 @@
 import os
 from collections import OrderedDict
 import concurrent.futures
-import msprime
 import pickle
 import argparse
 import stdpopsim
@@ -11,6 +10,7 @@ import bisect
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
+import demography as dm
 from parameter import Parameter
 import demography as dm
 

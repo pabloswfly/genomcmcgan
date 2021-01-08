@@ -6,6 +6,7 @@ def onepop_constant(args):
     """Single population model with pop size Ne and constant growth"""
 
     genob, params, randomize, i, proposals = args
+
     necessary_params = ["mu", "r", "Ne"]
     assert sorted(necessary_params) == sorted(
         list(params.keys())
@@ -52,7 +53,7 @@ def onepop_exp(args):
         mu, r, T1, N1, T2, N2, growth = [
             params[p].rand() if randomize else params[p].val for p in necessary_params
         ]
-
+        
     N0 = N2 / math.exp(-growth * T2)
 
     # Time is given in generations unit (t/25)
