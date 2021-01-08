@@ -39,7 +39,7 @@ def run_genomcmcgan(
             xtrain, ytrain, xval, yval = pickle.load(obj)
     else:
         xtrain, xval, ytrain, yval = genob.generate_data(num_reps=1000)
-
+        
     # Initialize the MCMCGAN object and the Discriminator
     mcmcgan = MCMCGAN(genob, kernel_name, seed)
     mcmcgan.discriminator = Discriminator()
