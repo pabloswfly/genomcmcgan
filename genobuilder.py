@@ -25,13 +25,36 @@ def executor(p):
 
 
 def do_sim(args):
+    """Perform msprime simulations with multiprocessing"""
 
-    seed = args[5]
+    # Perform simulation with chosen demographic model
     genob = args[0]
-    rng = random.Random(seed)
     ts = dm.onepop_exp(args)
 
-    return genob._resize_from_ts(ts, rng)
+    # Return resized matrix
+    return genob._resize_from_ts(ts)
+
+
+def do_parsing(args):
+    """Parse data from VCF files with multiprocessing"""
+
+    genob, callset, chrom, pos, loc_region, h, i = args
+    print(f"it {i}  :  chromosome {chrom}  :  position {pos}", end="\r")
+
+    # Extract genotype and genomic position for the variants for all samples
+    gt_zarr = np.asarray(callset[f"{chrom}/calldata/GT"][loc_region])
+    pos_zarr = callset[f"{chrom}/variants/POS"][loc_region]
+    alt_zarr = callset[f"{chrom}/variants/ALT"][loc_region]
+
+    # Make sure the genome is diploid, and extract one of the haplotypes
+    assert gt_zarr.shape[2] == 2, "Samples are not diploid"
+    hap = haploidify(gt_zarr, h)
+
+    # Get the relative position in the sequence length to resize the matrix
+    relative_pos = pos_zarr - pos
+
+    # Return resized matrix
+    return genob._resize_from_zarr(hap, relative_pos, alt_zarr)
 
 
 class Genobuilder:
@@ -47,6 +70,8 @@ class Genobuilder:
         maf_thresh,
         fixed_dim=128,
         seed=None,
+        zarr_path="",
+        mask_file="",
         parallelism=0,
         **kwargs,
     ):
@@ -57,7 +82,10 @@ class Genobuilder:
         self._fixed_dim = fixed_dim
         self._seed = seed
         self._num_reps = None
-        self.parallelism = parallelism
+        self._parallelism = parallelism
+        self._rng = random.Random(seed)
+        self._zarr_path = zarr_path
+        self._mask_file = mask_file
         super(Genobuilder, self).__init__(**kwargs)
 
     def set_parameters(self, sim_source, params):
@@ -104,6 +132,18 @@ class Genobuilder:
     @property
     def parallelism(self):
         return self._parallelism
+
+    @property
+    def rng(self):
+        return self._rng
+
+    @property
+    def zarr_path(self):
+        return self._zarr_path
+
+    @property
+    def mask_file(self):
+        return self._mask_file
 
     @num_samples.setter
     def num_samples(self, n):
@@ -161,11 +201,26 @@ class Genobuilder:
             p = os.cpu_count()
         self._parallelism = p
 
-    def simulate_msprime_list(self, param_vals, seed=None):
+    @rng.setter
+    def rng(self, r):
+        self._rng = r
+
+    @zarr_path.setter
+    def zarr_path(self, z):
+        assert isinstance(z, str), "zarr_path must be a string"
+        assert os.path.isdir(z), "path in zarr_path does not exist"
+        self._zarr_path = z
+
+    @mask_file.setter
+    def mask_file(self, m):
+        assert isinstance(m, str), "mask_file must be a string"
+        assert os.path.isfile(m), "file in mask_file does not exist"
+        self._mask_file = m
+
+    def simulate_msprime_list(self, param_vals):
+        """This function will go away once the code is complete"""
 
         sims = []
-        rng = random.Random(seed)
-
         for p in param_vals:
             sims.append(
                 msprime.simulate(
@@ -174,7 +229,7 @@ class Genobuilder:
                     length=self.seq_len,
                     mutation_rate=self.params["mu"].val,
                     recombination_rate=p,
-                    random_seed=seed,
+                    random_seed=self.seed,
                 )
             )
 
@@ -182,25 +237,27 @@ class Genobuilder:
 
         # For each tree sequence output from the simulation
         for i, ts in enumerate(sims):
-            mat[i] = self._resize_from_ts(ts, rng)
+            mat[i] = self._resize_from_ts(ts)
 
         # Expand dimension by 1 (add channel dim). -1 stands for last axis.
-        mat = np.expand_dims(mat, axis=1)
-
-        return mat
+        return np.expand_dims(mat, axis=1)
 
     def simulate_msprime(self, params, randomize=False, proposals=False):
         """Simulate demographic data, returning a tensor with n_reps number
-        of genotype matrices"""
+        of genotype matrices.
+        params: dictionary of Parameter class Values.
+        randomize: True for random parameter value selection (msprime sims)
+        proposals: True for proposal parameter values (calculating D(x) scores)
+        """
 
-        rng = random.Random(self.seed)
-
-        args = [
-            (self, params, randomize, i, proposals, rng.randrange(1, 2 ** 32))
-            for i in range(self.num_reps)
-        ]
+        # Prepare arguments and empty matrix
+        args = [(self, params, randomize, i, proposals) for i in range(self.num_reps)]
         mat = np.zeros((self.num_reps, self.num_samples, self.fixed_dim))
+
+        # Executor for multiprocessing
         ex = executor(self.parallelism)
+
+        # Do simulations with multiprocessing except if it takes too long
         timeout = 0.5 * self.num_reps
         try:
             for i, m in enumerate(ex.map(do_sim, args, timeout=timeout)):
@@ -208,67 +265,63 @@ class Genobuilder:
         except concurrent.futures.TimeoutError:
             print("time out!")
 
-        # Expand dimension by 1 (add channel dim). -1 stands for last axis.
-        mat = np.expand_dims(mat, axis=1)
+        # Expand dimension by 1 (add channel dim).
+        return np.expand_dims(mat, axis=1)
 
-        return mat
+    def parse_empirical_data(self, haplotype):
+        """Parse empirical data from Zarr files previously parsed
+        with vcf2zarr.py.
+        haplotype: hap to extract gt data. 0 or 1 for each of them, 2 for both
+        """
 
-    def _parse_empiricaldata(self, haplotype):
+        assert self.zarr_path != "", "--zarr-path argument must be a path string"
+        if haplotype == 2:
+            self.num_samples *= 2
 
-        # Set up some data paths
-        mask_file = "/content/gdrive/My Drive/mcmcgan/20140520.pilot_mask.autosomes.bed"
-        zarr_path = "/content/gdrive/My Drive/mcmcgan/zarr"
-
-        # Locate the data contained in zarr
-        callset = zarr.open_group(zarr_path, mode="r")
-
+        # Locate the data contained in the zarr files
+        callset = zarr.open_group(self.zarr_path, mode="r")
         num_samples = len(callset["1/samples"])
-
-        data = np.zeros((self.num_reps, num_samples, self.fixed_dim))
+        mat = np.zeros((self.num_reps, self.num_samples, self.fixed_dim))
 
         # Get lists of randomly selected chromosomes and genomic locations
-        chroms, pos, slices = self._random_sampling_geno(callset, mask_file=mask_file)
+        chrom, pos, loc_region = self._random_sampling_geno(callset)
+        idx = list(range(1, self.num_reps))
+        args = [
+            [self] * self.num_reps,
+            [callset] * self.num_reps,
+            chrom,
+            pos,
+            loc_region,
+            [haplotype] * self.num_reps,
+            idx,
+        ]
+        # Executor for multiprocessing
+        ex = executor(self.parallelism)
 
-        # For each randomly sampled genomic location
-        for i, (chrom, pos, loc_region) in enumerate(zip(chroms, pos, slices)):
-            print(f"it {i}  :  chromosome {chrom}  :  position {pos}")
+        # Do simulations with multiprocessing except if it takes too long
+        timeout = 0.5 * self.num_reps
+        try:
+            # For each randomly sampled genomic location
+            for i, m in enumerate(ex.map(do_parsing, zip(*args), timeout=timeout)):
+                mat[i] = m
+        except concurrent.futures.TimeoutError:
+            print("time out!")
 
-            # Extract genotype and genomic position for the variants for all samples
-            gt_zarr = np.asarray(callset[f"{chrom}/calldata/GT"][loc_region])
-            pos_zarr = callset[f"{chrom}/variants/POS"][loc_region]
-            alt_zarr = callset[f"{chrom}/variants/ALT"][loc_region]
+        # Expand dimension by 1 (add channel dim).
+        return np.expand_dims(mat, axis=1)
 
-            # Make sure the genome is diploid, and extract one of the haplotypes
-            assert gt_zarr.shape[2] == 2, "Samples are not diploid"
-            hap = self._haploidify(gt_zarr, haplotype)
+    def simulate_stdpopsim(self, engine, species, model, pop, error_prob=None):
+        """Generate simulated data from stdpopsim"""
 
-            # To check the number of 0s and 1s in each gt
-            # Filtering missing data by looking at -1? No -1 in 1000 genomes data.
-            # unique, counts = np.unique(hap, return_counts=True)
-            # print(dict(zip(unique, counts)))
-
-            # Get the relative position in the sequence length to resize the matrix
-            relative_pos = pos_zarr - pos
-
-            data[i] = self._resize_from_zarr(hap, relative_pos, alt_zarr)
-
-        data = np.expand_dims(data, axis=1)
-
-        return data
-
-    def simulate_stdpopsim(
-        self, engine, species, model, pop, error_prob=None, seed=None
-    ):
-
+        # Set variables for the simulator
         stdengine = stdpopsim.get_engine(engine)
         stdspecies = stdpopsim.get_species(species)
         stdmodel = stdspecies.get_demographic_model(model)
 
+        # Sample genotype location with odds weighted by chromosome length
         geno = [(i, get_chrom_size(i)) for i in range(1, 23)]
-        # Sort the list by size.
         geno.sort(key=lambda a: a[1], reverse=True)
         cum_weights = []
-        rng = random.Random(self.seed)
         for i, (chrom, size) in enumerate(geno):
             cum_weights.append(size if i == 0 else size + cum_weights[i - 1])
 
@@ -280,43 +333,39 @@ class Genobuilder:
         elif pop == "CHB":
             stdsamples = stdmodel.get_samples(0, 0, self.num_samples)
 
+        # Perform simulations
         sims = []
         for i in range(self.num_reps):
-            chrom, size = rng.choices(geno, cum_weights=cum_weights)[0]
+            chrom, size = self.rng.choices(geno, cum_weights=cum_weights)[0]
             factor = self.seq_len / size
             stdcontig = stdspecies.get_contig(
                 "chr" + str(chrom), length_multiplier=factor
             )
-            sims.append(
-                stdengine.simulate(stdmodel, stdcontig, stdsamples, seed=self.seed)
-            )
+            sims.append(stdengine.simulate(stdmodel, stdcontig, stdsamples))
 
         mat = np.zeros((self.num_reps, self.num_samples, self.fixed_dim))
 
-        rng = random.Random(seed)
-        # For each tree sequence output from the simulation
+        # Resize from ts, and add sequencing errors if error_prob is given
         for i, ts in enumerate(sims):
-
             if type(error_prob) is float:
                 mat[i] = self._mutate_geno_old(ts, p=error_prob)
 
             elif type(error_prob) is np.ndarray:
                 mat[i] = self._mutate_geno_old(ts, p=error_prob[i])
 
-            # No error prob, it doesn't mutate the matrix
+            # No error prob, don't mutate the matrix
             else:
-                mat[i] = self._resize_from_ts(ts, rng)
+                mat[i] = self._resize_from_ts(ts)
 
-        # Expand dimension by 1 (add channel dim). -1 stands for last axis.
-        mat = np.expand_dims(mat, axis=1)
-
-        return mat
+        # Expand dimension by 1 (add channel dim)
+        return np.expand_dims(mat, axis=1)
 
     def generate_data(self, num_reps, proposals=False):
-        # Generate (X, y) data from demographic simulations.
+        """Generate (X, y) labelled data from demographic simulations. The labels
+        are y=0 for simulated data and y=1 for data with parameters to infer."""
 
         self.num_reps = num_reps
-
+        # Generate genotype matrices from the data with params to infer
         print(f"generating {num_reps} genotype matrices from {self.source}")
         if self.source == "stdpopsim":
             gen1 = self.simulate_stdpopsim(
@@ -328,14 +377,16 @@ class Genobuilder:
             )
 
         elif self.source == "empirical":
-            gen1 = self._parse_empiricaldata(haplotype=0)
+            gen1 = self.parse_empirical_data(haplotype=0)
 
         elif self.source == "msprime":
             gen1 = self.simulate_msprime(self.params)
 
+        # Generate genotype matrices from the simulated data
         print(f"generating {num_reps} genotype matrices from msprime")
         gen0 = self.simulate_msprime(self.params, randomize=True, proposals=proposals)
 
+        # Assemble data and labels
         X = np.concatenate((gen1, gen0))
         y = np.concatenate((np.ones((num_reps)), np.zeros((num_reps))))
         print(f"X data shape is: {X.shape}")
@@ -344,137 +395,17 @@ class Genobuilder:
         return train_test_split(X, y, test_size=0.1, random_state=self.seed)
 
     def generate_fakedata(self, num_reps, testlist=None):
+        """Generate a batch of only simulated data.
+        testlist: list of parameter values that I use for debugging
+        """
 
         self.num_reps = num_reps
-
         print(f"generating {num_reps} genotype matrices from msprime for testing")
-        return self.simulate_msprime(self.params, seed=None, randomize=True)
+        return self.simulate_msprime(self.params, randomize=True)
 
-    def _mutate_geno_old(self, ts, p=0.001):
-        """Returns a genotype matrix with a fixed number of columns,
-        as specified in x"""
-
-        rows = int(self.num_samples)
-        cols = int(self.seq_len)
-        m = np.zeros((rows, cols), dtype=float)
-
-        for variant in ts.variants():
-
-            # Filter by MAF
-            if self.maf_thresh is not None:
-                af = np.mean(variant.genotypes)
-                if af < self.maf_thresh or af > 1 - self.maf_thresh:
-                    continue
-
-            m[:, int(variant.site.position)] += variant.genotypes
-
-        m = m.flatten()
-        n = np.random.binomial(len(m), p)
-        idx = np.random.randint(0, len(m), size=n)
-        m[idx] = 1 - m[idx]
-        m = m.reshape((rows, cols))
-
-        f = int(cols / self.fixed_dim)
-        mat = np.zeros((rows, self.fixed_dim), dtype=float)
-
-        for i in range(self.fixed_dim):
-            s = i * f
-            e = s + f - 1
-            mat[:, i] = np.sum(m[:, s:e], axis=1)
-
-        return mat
-
-    def _mutate_geno(self, ts, p=0.001, flip=True):
-        """Returns a genotype matrix with a fixed number of columns,
-        as specified in x"""
-
-        rows = int(self.num_samples)
-        cols = int(self.fixed_dim)
-        m = np.zeros((rows, cols), dtype=float)
-
-        for variant in ts.variants():
-
-            # Filter by MAF
-            if self.maf_thresh is not None:
-                af = np.mean(variant.genotypes)
-                if af < self.maf_thresh or af > 1 - self.maf_thresh:
-                    continue
-
-            # Polarise the matrix by major allele frequency.
-            if flip:
-                af = np.mean(variant.genotypes)
-                if af > 0.5 or (af == 0.5 and random.Random() > 0.5):
-                    variant.genotypes = 1 - variant.genotypes
-
-            n = np.random.binomial(len(variant.genotypes), p)
-            if n is not None:
-                idx = np.random.randint(0, len(variant.genotypes), size=n)
-                variant.genotypes[idx] = 1 - variant.genotypes[idx]
-
-            j = int(variant.site.position * self.fixed_dim / ts.sequence_length)
-            np.add(
-                m[:, j], variant.genotypes, out=m[:, j], where=variant.genotypes != -1
-            )
-
-        return m
-
-    def _random_sampling_geno(self, callset, mask_file=None, seed=None):
-        """random sampling from chromosome based on the proportional
-        size and the mask"""
-
-        # Extract chromosome number and length from stdpopsim catalog
-        geno = [(i, get_chrom_size(i)) for i in range(1, 23)]
-
-        # Sort the list by size.
-        geno.sort(key=lambda a: a[1], reverse=True)
-
-        cum_weights = []
-        for i, (chrom, size) in enumerate(geno):
-            cum_weights.append(size if i == 0 else size + cum_weights[i - 1])
-
-        print("Charging up the chromosomes")
-        locs = [0]
-        for i in range(1, 23):
-            print(f"Charging chromosome {i}")
-            query = f"{i}/variants/POS"
-            locs.append(np.asarray(callset[query]))
-
-        mask = load_mask(mask_file, min_len=10000) if mask_file else None
-
-        rng = random.Random(seed)
-        chroms, slices, pos = [], [], []
-
-        while len(chroms) < self.num_reps:
-            chrom, size = rng.choices(geno, cum_weights=cum_weights)[0]
-
-            assert size > self.seq_len
-            proposal = rng.randrange(0, size - self._seq_len)
-
-            if mask:
-                for start, end in mask[str(chrom)]:
-                    if start < proposal < end:
-                        chroms.append(chrom)
-                        pos.append(proposal)
-                        slices.append(
-                            locate(
-                                locs[chrom],
-                                start=proposal,
-                                stop=proposal + self._seq_len,
-                            )
-                        )
-
-            else:
-                chroms.append(chrom)
-                pos.append(proposal)
-                slices.append(
-                    locate(locs[chrom], start=proposal, stop=proposal + self.seq_len)
-                )
-
-        return chroms, pos, slices
-
-    def _resize_from_ts(self, ts, rng, flip=True):
-        """Returns a genotype matrix with a fixed number of columns,
-        as specified in size"""
+    def _mutate_geno(self, ts, p=0.001):
+        """Mutate a tree sequence simulation introducing sequencing errors
+        with probability p. Then, create and resize a genotype matrix"""
 
         m = np.zeros((ts.num_samples, self.fixed_dim), dtype=int)
         ac_thresh = self.maf_thresh * ts.num_samples
@@ -490,16 +421,102 @@ class Genobuilder:
 
             # Polarise 0 and 1 in genotype matrix by major allele frequency.
             # If allele counts are the same, randomly choose a major allele.
-            if flip:
-                if ac1 > ac0 or (ac1 == ac0 and rng.random() > 0.5):
-                    genotypes ^= 1
+            if ac1 > ac0 or (ac1 == ac0 and self.rng.random() > 0.5):
+                genotypes ^= 1
+
+            n = np.random.binomial(len(variant.genotypes), p)
+            if n is not None:
+                idx = np.random.randint(0, len(variant.genotypes), size=n)
+                variant.genotypes[idx] = 1 - variant.genotypes[idx]
+
+            j = int(variant.site.position * self.fixed_dim / ts.sequence_length)
+            np.add(
+                m[:, j], variant.genotypes, out=m[:, j], where=variant.genotypes != -1
+            )
+
+        return m
+
+    def _random_sampling_geno(self, callset):
+        """Random sampling of a genomic window with the odds weighted by
+        chromosome length. If a genomic mask is given, it filters regions with
+        low quantity of callable regions"""
+
+        # Extract chromosome number and length from stdpopsim catalog
+        geno = [(i, get_chrom_size(i)) for i in range(1, 23)]
+
+        # Sort the list by size.
+        geno.sort(key=lambda a: a[1], reverse=True)
+
+        # Get cumulative weights for each chromosome for sampling
+        cum_weights = []
+        for i, (chrom, size) in enumerate(geno):
+            cum_weights.append(size if i == 0 else size + cum_weights[i - 1])
+
+        print("Charging up the chromosomes")
+        locs = [0]
+        for i in range(1, 23):
+            print(f"Charging chromosome {i}", end="\r")
+            query = f"{i}/variants/POS"
+            locs.append(np.asarray(callset[query]))
+
+        # Load mask if given
+        mask = load_mask(self.mask_file) if self.mask_file else None
+
+        # Initialize empty variables
+        chroms, slices, pos = [], [], []
+
+        # Sample until we obtain the desired number of genomic regions
+        while len(chroms) < self.num_reps:
+            chrom, size = self.rng.choices(geno, cum_weights=cum_weights)[0]
+            assert size > self.seq_len
+
+            # Check if the proposed regions falls mostly inside the mask
+            start_proposal = self.rng.randrange(0, size - self.seq_len)
+            if mask:
+                if not inside_mask(mask, start_proposal, chrom, self.seq_len):
+                    continue
+
+            # If region is OK, append the region data to the lists
+            chroms.append(chrom)
+            pos.append(start_proposal)
+            slices.append(
+                locate(
+                    locs[chrom],
+                    start=start_proposal,
+                    stop=start_proposal + self.seq_len,
+                )
+            )
+
+        return chroms, pos, slices
+
+    def _resize_from_ts(self, ts):
+        """Returns a genotype matrix with a fixed number of columns,
+        as specified in size"""
+
+        # Initialize empty matrix with the new dimensions
+        m = np.zeros((ts.num_samples, self.fixed_dim), dtype=int)
+        ac_thresh = self.maf_thresh * ts.num_samples
+
+        for variant in ts.variants():
+
+            # Filter by MAF
+            genotypes = variant.genotypes
+            ac1 = np.sum(genotypes)
+            ac0 = len(genotypes) - ac1
+            if min(ac0, ac1) < ac_thresh:
+                continue
+
+            # Polarise 0 and 1 in genotype matrix by major allele frequency.
+            # If allele counts are the same, randomly choose a major allele.
+            if ac1 > ac0 or (ac1 == ac0 and self.rng.random() > 0.5):
+                genotypes ^= 1
 
             j = int(variant.site.position * self.fixed_dim / ts.sequence_length)
             m[:, j] += genotypes
 
         return m.astype(float)
 
-    def _resize_from_zarr(self, mat, pos, alts, rng, flip=True):
+    def _resize_from_zarr(self, mat, pos, alts):
         """Resizes a matrix using a sum window, given a genotype matrix,
         positions vector,sequence length and the desired fixed size
         of the new matrix"""
@@ -511,13 +528,6 @@ class Genobuilder:
         # Fill in the resized matrix
         for _pos, _gt, _alt in zip(pos, mat, alts):
 
-            """
-            # Check that all the SNPs are biallelic
-            if np.count_nonzero(_alt) != 1:
-                print('found')
-                continue
-            """
-
             # Filter by MAF
             ac1 = np.sum(_gt)
             ac0 = len(_gt) - ac1
@@ -526,50 +536,29 @@ class Genobuilder:
 
             # Polarise 0 and 1 in genotype matrix by major allele frequency.
             # If allele counts are the same, randomly choose a major allele.
-            if flip:
-                if ac1 > ac0 or (ac1 == ac0 and rng.random() > 0.5):
-                    _gt ^= 1
+            if ac1 > ac0 or (ac1 == ac0 and self.rng.random() > 0.5):
+                _gt ^= 1
 
             j = int(_pos * self.fixed_dim / self.seq_len) - 1
             np.add(m[:, j], _gt, out=m[:, j], where=_gt != -1)
 
-        return m
-
-    def _haploidify(self, genmat, h):
-        """Returns the selected haplotype from a numpy array with
-        a ploidy dimension. The parameter h must be either 0 or 1"""
-
-        if h in [0, 1, 2]:
-            if h == 2:
-                self.num_samples *= 2
-                return np.concatenate((genmat[:, :, 0], genmat[:, :, 1]))
-            else:
-                return genmat[:, :, h]
-
-        print("The parameter h must be 0 or 1 for one haplotype, or 2 for both")
-        return
+        return m.astype(float)
 
 
-def filter_maf(gt, pos, maf):
-    """Filter a genotype matrix gt and the SNP position vector pos in base of
-    the desired Minor Allele Frequency maf parameter"""
+def haploidify(genmat, h):
+    """Returns the selected haplotype from a numpy array with
+    a ploidy dimension. The parameter h must be either 0, 1 or 2"""
 
-    # Filter alleles and position where af > maf_threshold i.e. 0.05
-    af = np.mean(gt, axis=1)
-    condition = af > maf
-    gt = gt[np.array(condition), :]
-    pos = pos[condition]
+    if h in [0, 1, 2]:
+        if h == 2:
+            return np.concatenate((genmat[:, :, 0], genmat[:, :, 1]))
+        else:
+            return genmat[:, :, h]
 
-    # Filter alleles and position where af > 1 - maf_threshold i.e. 0.95
-    af = np.mean(gt, axis=1)
-    condition = af < 1 - maf
-    gt = gt[np.array(condition), :]
-    pos = pos[condition]
-
-    return gt, pos
+    print("The parameter h must be 0 or 1 for one haplotype, or 2 for both")
 
 
-def load_mask(mask_file, min_len):
+def load_mask(mask_file):
     """Given a mask file in BED format, parse the mask data and
     returns a matrix of tuples containing the permited regions,
     as (start, end) positions"""
@@ -581,14 +570,40 @@ def load_mask(mask_file, min_len):
     with open(mask_file, "r") as file:
         for line in file:
             chrom, start, end, _ = line.split()
-            start, end = int(start), int(end)
-
-            if (end - start) > min_len:
-                mask[chrom[3:]].append((int(start), int(end)))
-
+            mask[chrom[3:]].append((int(start), int(end)))
         file.close()
 
     return mask
+
+
+def inside_mask(mask, first, chrom, seq_len, threshold=0.7):
+    """Check whether a proposal with starting position 'first' falls inside
+    the given mask, with a number of bp inside higher than the threshold"""
+
+    inside = 0
+    # Calculate ending position of the proposal
+    last = first + seq_len
+
+    # For each permited genomic window within the mask
+    for i, (start, end) in enumerate(mask[str(chrom)]):
+        # If the start of proposal is inside this range, save the number of bp
+        if start <= first < end:
+            inside = end - first
+
+            # Look for the genomic window where the proposal ends in the rest
+            # of the mask, summing up the number of bp inside the mask meanwhile
+            for start, end in mask[str(chrom)][i:]:
+
+                # If found, break the loop and sum the last bps
+                if start <= last < end:
+                    inside += last - start
+                    break
+                else:
+                    inside += end - start
+            break
+
+    # Return True if the fraction of bp inside the mask is higher than threshold
+    return True if inside / seq_len > threshold else False
 
 
 def get_chrom_size(chrom):
@@ -626,6 +641,7 @@ def get_chrom_size(chrom):
 
 
 def draw_genmat(img, name):
+    """Plot a given genotype matrix"""
 
     plt.imshow(img, cmap="winter")
     plt.title(f"genomat_{name}")
@@ -643,49 +659,6 @@ def locate(sorted_idx, start=None, stop=None):
     )
 
     return slice(start_idx, stop_idx)
-
-
-def samples_from_population(pop_file):
-    """Return a list of sample IDs given a population file from the
-    online repository of 1000 genomes project"""
-
-    population = np.loadtxt(pop_file, dtype=str, delimiter="\t", skiprows=1)
-
-    return population[:, 0]
-
-
-def vcf2zarr(vcf_files, pop_file, zarr_path):
-    # Two veery good tutorials:
-    # http://alimanfoo.github.io/2018/04/09/selecting-variants.html
-    # http://alimanfoo.github.io/2017/06/14/read-vcf.html
-    # TODO: Refactor to work without pysam and allel
-
-    # Get a list of the wanted samples from one population
-    # which are found in the VCF files
-    # The files must be numbered, and that number must be substituted
-    # in the input path string with {n}.
-    import pysam
-    import allel
-
-    first_vcf = pysam.VariantFile(vcf_files.replace("{n}", "1"))
-    wanted_samples = samples_from_population(pop_file)
-    found_samples = list(
-        set(wanted_samples).intersection(list(first_vcf.header.samples))
-    )
-
-    # Create one zarr folder for each chromosome
-    for chrom in range(1, 23):
-        vcf = vcf_files.replace("{n}", str(chrom))
-        print(f"Creating zarr object for chromosome {chrom}")
-        allel.vcf_to_zarr(
-            vcf,
-            zarr_path,
-            group=str(chrom),
-            region=str(chrom),
-            fields=["POS", "ALT", "samples", "GT"],
-            samples=found_samples,
-            overwrite=True,
-        )
 
 
 # ------------------------------------------------------------------------------
@@ -751,6 +724,22 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "-z",
+        "--zarr-path",
+        help="Path pointing to the directory with the zarr objects containing genomic data",
+        default="",
+        type=str,
+    )
+
+    parser.add_argument(
+        "-m",
+        "--mask-file",
+        help="Genomic mask to use for random sampling of VCF files from empirical data",
+        default="",
+        type=str,
+    )
+
+    parser.add_argument(
         "-o",
         "--output",
         help="Name of the output file with the downloaded pickle object",
@@ -780,7 +769,7 @@ if __name__ == "__main__":
 
 
     params_dict["r"] = Parameter(
-        "r", 1.25e-9, 1e-8, (1e-11, 1e-7), inferable=False, plotlog=True
+        "r", 1.25e-8, 1e-9, (1e-10, 1e-7), inferable=False, plotlog=True
     )
     params_dict["mu"] = Parameter(
         "mu", 1.25e-8, 1e-9, (1e-11, 1e-7), inferable=False, plotlog=True
@@ -789,10 +778,10 @@ if __name__ == "__main__":
 
     # For onepop_exp model:
     params_dict["T1"] = Parameter("T1", 3000, 4000, (1500, 5000), inferable=True)
-    params_dict["N1"] = Parameter("N1", 10000, 20000, (1000, 30000), inferable=False)
-    params_dict["T2"] = Parameter("T2", 500, 1000, (100, 1500), inferable=True)
-    params_dict["N2"] = Parameter("N2", 5000, 20000, (1000, 20000), inferable=False)
-    params_dict["growth"] = Parameter("growth", 0.01, 0.02, (0, 0.05), inferable=False)
+    params_dict["N1"] = Parameter("N1", 10000, 20000, (1000, 30000), inferable=True)
+    params_dict["T2"] = Parameter("T2", 500, 1000, (100, 1500), inferable=False)
+    params_dict["N2"] = Parameter("N2", 5000, 20000, (1000, 30000), inferable=True)
+    params_dict["growth"] = Parameter("growth", 0.01, 0.02, (0, 0.05), inferable=True)
 
     # For onepop_migration model:
     """
@@ -802,12 +791,15 @@ if __name__ == "__main__":
     params_dict["mig"] = Parameter("mig", 0.9, 0.2, (0, 0.3), inferable=True)
     """
 
+    # Build the Genobuilder object
     genob = Genobuilder(
         source=args.source,
         num_samples=args.number_haplotypes,
         seq_len=args.sequence_length,
         maf_thresh=args.maf_threshold,
         fixed_dim=args.fixed_dimension,
+        zarr_path=args.zarr_path,
+        mask_file=args.mask_file,
         seed=args.seed,
         parallelism=args.parallelism,
     )
@@ -818,12 +810,14 @@ if __name__ == "__main__":
         print("No parameters detected in the parameter dictionary")
         genob = None
 
+    # When the user only wants the Genobuilder object as a pickled file
     if genob and args.function == "init":
 
         output = str(args.output) + ".pkl"
         with open(output, "wb") as obj:
             pickle.dump(genob, obj, protocol=pickle.HIGHEST_PROTOCOL)
 
+    # When the user wants the pickled Genobuilder and also genotype matrices
     elif genob and args.function == "download_genmats":
 
         xtrain, xval, ytrain, yval = genob.generate_data(args.num_rep)
@@ -842,3 +836,4 @@ if __name__ == "__main__":
 
 # Command example:
 # python genobuilder.py download_genmats -n 1000 -s msprime -nh 99 -l 1e6 -maf 0.05 -f 128 -se 2020 -o test -p 16
+# python genobuilder.py download_genmats -n 1000 -s empirical -z data/zarr -m data/20140520.pilot_mask.autosomes.bed -se 2020 -o test -p 64
