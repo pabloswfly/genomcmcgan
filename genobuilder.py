@@ -32,7 +32,7 @@ def do_sim(args):
     ts = dm.onepop_exp(args)
 
     # Return resized matrix
-    return genob._resize_from_ts(ts)
+    return genob.resize_from_ts(ts)
 
 
 def do_parsing(args):
@@ -54,7 +54,7 @@ def do_parsing(args):
     relative_pos = pos_zarr - pos
 
     # Return resized matrix
-    return genob._resize_from_zarr(hap, relative_pos, alt_zarr)
+    return genob.resize_from_zarr(hap, relative_pos, alt_zarr)
 
 
 class Genobuilder:
@@ -237,7 +237,7 @@ class Genobuilder:
 
         # For each tree sequence output from the simulation
         for i, ts in enumerate(sims):
-            mat[i] = self._resize_from_ts(ts)
+            mat[i] = self.resize_from_ts(ts)
 
         # Expand dimension by 1 (add channel dim). -1 stands for last axis.
         return np.expand_dims(mat, axis=1)
@@ -284,7 +284,7 @@ class Genobuilder:
         mat = np.zeros((self.num_reps, self.num_samples, self.fixed_dim))
 
         # Get lists of randomly selected chromosomes and genomic locations
-        chrom, pos, loc_region = self._random_sampling_geno(callset)
+        chrom, pos, loc_region = self.random_sampling_geno(callset)
         idx = list(range(1, self.num_reps))
         args = [
             [self] * self.num_reps,
@@ -348,14 +348,14 @@ class Genobuilder:
         # Resize from ts, and add sequencing errors if error_prob is given
         for i, ts in enumerate(sims):
             if type(error_prob) is float:
-                mat[i] = self._mutate_geno_old(ts, p=error_prob)
+                mat[i] = self.resize_and_mutate_geno(ts, p=error_prob)
 
             elif type(error_prob) is np.ndarray:
-                mat[i] = self._mutate_geno_old(ts, p=error_prob[i])
+                mat[i] = self.resize_and_mutate_geno(ts, p=error_prob[i])
 
             # No error prob, don't mutate the matrix
             else:
-                mat[i] = self._resize_from_ts(ts)
+                mat[i] = self.resize_from_ts(ts)
 
         # Expand dimension by 1 (add channel dim)
         return np.expand_dims(mat, axis=1)
@@ -403,7 +403,7 @@ class Genobuilder:
         print(f"generating {num_reps} genotype matrices from msprime for testing")
         return self.simulate_msprime(self.params, randomize=True)
 
-    def _mutate_geno(self, ts, p=0.001):
+    def resize_and_mutate_geno(self, ts, p=0.001):
         """Mutate a tree sequence simulation introducing sequencing errors
         with probability p. Then, create and resize a genotype matrix"""
 
@@ -436,7 +436,7 @@ class Genobuilder:
 
         return m
 
-    def _random_sampling_geno(self, callset):
+    def random_sampling_geno(self, callset):
         """Random sampling of a genomic window with the odds weighted by
         chromosome length. If a genomic mask is given, it filters regions with
         low quantity of callable regions"""
@@ -489,7 +489,7 @@ class Genobuilder:
 
         return chroms, pos, slices
 
-    def _resize_from_ts(self, ts):
+    def resize_from_ts(self, ts):
         """Returns a genotype matrix with a fixed number of columns,
         as specified in size"""
 
@@ -516,7 +516,7 @@ class Genobuilder:
 
         return m.astype(float)
 
-    def _resize_from_zarr(self, mat, pos, alts):
+    def resize_from_zarr(self, mat, pos, alts):
         """Resizes a matrix using a sum window, given a genotype matrix,
         positions vector,sequence length and the desired fixed size
         of the new matrix"""
@@ -734,7 +734,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-m",
         "--mask-file",
-        help="Genomic mask to use for random sampling of VCF files from empirical data",
+        help="Genomic mask to use for filtering empirical genomic data from VCF files",
         default="",
         type=str,
     )
