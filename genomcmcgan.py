@@ -75,7 +75,7 @@ def run_genomcmcgan(
     # Obtain initial chain states and initial step sizes, and set up the MCMC
     inits = [p.initial_guess for p in inferable_params]
     step_sizes = [(p.initial_guess * 0.1) for p in inferable_params]
-    mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 0)
+    mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 1)
 
     max_num_iters = 5
     convergence = False
@@ -114,7 +114,7 @@ def run_genomcmcgan(
 
         inits = means
         step_sizes = stds
-        mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 0)
+        mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 1)
 
         # Generate new batches of real data and updated simulated data
         xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(
