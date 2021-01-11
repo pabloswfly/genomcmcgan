@@ -39,7 +39,7 @@ def run_genomcmcgan(
             xtrain, ytrain, xval, yval = pickle.load(obj)
     else:
         xtrain, xval, ytrain, yval = genob.generate_data(num_reps=1000)
-        
+
     # Initialize the MCMCGAN object and the Discriminator
     mcmcgan = MCMCGAN(genob, kernel_name, seed)
     mcmcgan.discriminator = Discriminator()
@@ -107,8 +107,11 @@ def run_genomcmcgan(
         # Calculate means and standard deviation for next MCMC sampling step
         means = np.mean(mcmcgan.samples, axis=0)
         stds = np.std(mcmcgan.samples, axis=0)
+        percentiles = np.percentile(mcmcgan.samples, [2.5, 97.5], axis=0)
         for j, p in enumerate(inferable_params):
             print(f"{p.name} samples with mean {means[j]} and std {stds[j]}")
+            p.bounds = tuple(percentiles[:,j])
+
         inits = means
         step_sizes = stds
         mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 0)
