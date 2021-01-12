@@ -27,7 +27,7 @@ def onepop_constant(args):
         length=genob.seq_len,
         mutation_rate=mu,
         recombination_rate=r,
-        random_seed=genob.seed,
+        #random_seed=genob.seed,
     )
 
     return ts
@@ -68,7 +68,7 @@ def onepop_exp(args):
         length=genob.seq_len,
         mutation_rate=mu,
         recombination_rate=r,
-        random_seed=genob.seed,
+        #random_seed=genob.seed,
     )
 
     return ts
@@ -108,7 +108,7 @@ def onepop_migration(args):
         length=genob.seq_len,
         mutation_rate=mu,
         recombination_rate=r,
-        random_seed=genob.seed,
+        #random_seed=genob.seed,
     )
 
     return ts
