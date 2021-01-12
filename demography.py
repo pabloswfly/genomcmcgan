@@ -27,7 +27,7 @@ def onepop_constant(args):
         length=genob.seq_len,
         mutation_rate=mu,
         recombination_rate=r,
-        #random_seed=genob.seed,
+        # random_seed=genob.seed,
     )
 
     return ts
@@ -41,7 +41,9 @@ def onepop_exp(args):
     necessary_params = ["mu", "r", "T1", "N1", "T2", "N2", "growth"]
     for p in necessary_params:
         if p not in list(params.keys()):
-            print("Invalid combination of parameters. Needed: mu | r | T1 | N1 | T2 | N2 | growth")
+            print(
+                "Invalid combination of parameters. Needed: mu | r | T1 | N1 | T2 | N2 | growth"
+            )
 
     if proposals:
         mu, r, T1, N1, T2, N2, growth = [
@@ -68,7 +70,7 @@ def onepop_exp(args):
         length=genob.seq_len,
         mutation_rate=mu,
         recombination_rate=r,
-        #random_seed=genob.seed,
+        # random_seed=genob.seed,
     )
 
     return ts
@@ -82,7 +84,9 @@ def onepop_migration(args):
     necessary_params = ["mu", "r", "T1", "N1", "N2", "mig"]
     for p in necessary_params:
         if p not in list(params.keys()):
-            print("Invalid combination of parameters. Needed: mu | r | T1 | N1 | N2 | mig")
+            print(
+                "Invalid combination of parameters. Needed: mu | r | T1 | N1 | N2 | mig"
+            )
 
     if proposals:
         mu, r, T1, N1, N2, mig = [
@@ -108,7 +112,7 @@ def onepop_migration(args):
         length=genob.seq_len,
         mutation_rate=mu,
         recombination_rate=r,
-        #random_seed=genob.seed,
+        # random_seed=genob.seed,
     )
 
     return ts

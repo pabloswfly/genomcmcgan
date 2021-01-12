@@ -110,7 +110,7 @@ def run_genomcmcgan(
         percentiles = np.percentile(mcmcgan.samples, [2.5, 97.5], axis=0)
         for j, p in enumerate(inferable_params):
             print(f"{p.name} samples with mean {means[j]} and std {stds[j]}")
-            p.bounds = tuple(percentiles[:,j])
+            p.bounds = tuple(percentiles[:, j])
 
         inits = means
         step_sizes = stds

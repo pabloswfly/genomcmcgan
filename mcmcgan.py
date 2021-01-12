@@ -213,7 +213,7 @@ class MCMCGAN:
         for i, p in enumerate(params):
             sns.distplot(self.samples[:, i], color=colors[i])
             ymax = plt.ylim()[1]
-            if self.genob.source == 'msprime':
+            if self.genob.source == "msprime":
                 plt.vlines(p.val, 0, ymax, color=colors[i])
             plt.ylim(0, ymax)
             plt.legend([p.name])
@@ -237,7 +237,7 @@ class MCMCGAN:
         plt.clf()
         for i, p in enumerate(params):
             plt.plot(self.samples[:, i], c=colors[i], alpha=0.3)
-            if self.genob.source == 'msprime':
+            if self.genob.source == "msprime":
                 plt.hlines(
                     p.val,
                     0,

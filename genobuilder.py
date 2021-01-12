@@ -30,9 +30,9 @@ def do_sim(args):
     # Perform simulation with chosen demographic model
     genob, params = args[0:2]
     ts = dm.onepop_exp(args)
-    if params['seqerr'].val:
+    if params["seqerr"].inferable:
         # Return resized matrix
-        return genob.resize_and_mutate(ts, params['seqerr'].val)
+        return genob.resize_and_mutate(ts, params["seqerr"].val)
     else:
         return genob.resize_from_ts(ts)
 
@@ -517,6 +517,7 @@ class Genobuilder:
         """Mutate a tree sequence simulation introducing sequencing errors
         with probability p. Then, create and resize a genotype matrix"""
 
+        assert p_error is not None, "p_error is not given"
         m = np.zeros((ts.num_samples, self.fixed_dim), dtype=int)
         ac_thresh = self.maf_thresh * ts.num_samples
 
@@ -524,9 +525,8 @@ class Genobuilder:
 
             genotypes = variant.genotypes
             n = np.random.binomial(len(genotypes), p_error)
-            if n is not None:
-                idx = np.random.randint(0, len(genotypes), size=n)
-                genotypes[idx] = 1 - genotypes[idx]
+            idx = np.random.randint(0, len(genotypes), size=n)
+            genotypes[idx] = 1 - genotypes[idx]
 
             # Filter by MAF
             ac1 = np.sum(genotypes)
@@ -767,7 +767,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     params_dict = OrderedDict()
 
-
     params_dict["r"] = Parameter(
         "r", 1.25e-8, 1e-9, (1e-10, 1e-7), inferable=False, plotlog=True
     )
@@ -782,7 +781,9 @@ if __name__ == "__main__":
     params_dict["T2"] = Parameter("T2", 500, 1000, (100, 1500), inferable=False)
     params_dict["N2"] = Parameter("N2", 5000, 20000, (1000, 30000), inferable=True)
     params_dict["growth"] = Parameter("growth", 0.01, 0.02, (0, 0.05), inferable=True)
-    params_dict["seqerr"] = Parameter("seqerr", None, 0.001, (0.00001, 0.01), inferable=False)
+    params_dict["seqerr"] = Parameter(
+        "seqerr", None, 0.001, (0.00001, 0.01), inferable=False
+    )
 
     # For onepop_migration model:
     """
