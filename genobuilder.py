@@ -28,11 +28,13 @@ def do_sim(args):
     """Perform msprime simulations with multiprocessing"""
 
     # Perform simulation with chosen demographic model
-    genob = args[0]
+    genob, params = args[0:2]
     ts = dm.onepop_exp(args)
-
-    # Return resized matrix
-    return genob._resize_from_ts(ts)
+    if params["seqerr"].inferable:
+        # Return resized matrix
+        return genob.resize_and_mutate(ts, params["seqerr"].val)
+    else:
+        return genob.resize_from_ts(ts)
 
 
 def do_parsing(args):
@@ -54,7 +56,7 @@ def do_parsing(args):
     relative_pos = pos_zarr - pos
 
     # Return resized matrix
-    return genob._resize_from_zarr(hap, relative_pos, alt_zarr)
+    return genob.resize_from_zarr(hap, relative_pos, alt_zarr)
 
 
 class Genobuilder:
@@ -237,7 +239,7 @@ class Genobuilder:
 
         # For each tree sequence output from the simulation
         for i, ts in enumerate(sims):
-            mat[i] = self._resize_from_ts(ts)
+            mat[i] = self.resize_from_ts(ts)
 
         # Expand dimension by 1 (add channel dim). -1 stands for last axis.
         return np.expand_dims(mat, axis=1)
@@ -284,7 +286,7 @@ class Genobuilder:
         mat = np.zeros((self.num_reps, self.num_samples, self.fixed_dim))
 
         # Get lists of randomly selected chromosomes and genomic locations
-        chrom, pos, loc_region = self._random_sampling_geno(callset)
+        chrom, pos, loc_region = self.random_sampling_geno(callset)
         idx = list(range(1, self.num_reps))
         args = [
             [self] * self.num_reps,
@@ -348,14 +350,14 @@ class Genobuilder:
         # Resize from ts, and add sequencing errors if error_prob is given
         for i, ts in enumerate(sims):
             if type(error_prob) is float:
-                mat[i] = self._mutate_geno_old(ts, p=error_prob)
+                mat[i] = self.resize_and_mutate(ts, p=error_prob)
 
             elif type(error_prob) is np.ndarray:
-                mat[i] = self._mutate_geno_old(ts, p=error_prob[i])
+                mat[i] = self.resize_and_mutate(ts, p=error_prob[i])
 
             # No error prob, don't mutate the matrix
             else:
-                mat[i] = self._resize_from_ts(ts)
+                mat[i] = self.resize_from_ts(ts)
 
         # Expand dimension by 1 (add channel dim)
         return np.expand_dims(mat, axis=1)
@@ -403,40 +405,7 @@ class Genobuilder:
         print(f"generating {num_reps} genotype matrices from msprime for testing")
         return self.simulate_msprime(self.params, randomize=True)
 
-    def _mutate_geno(self, ts, p=0.001):
-        """Mutate a tree sequence simulation introducing sequencing errors
-        with probability p. Then, create and resize a genotype matrix"""
-
-        m = np.zeros((ts.num_samples, self.fixed_dim), dtype=int)
-        ac_thresh = self.maf_thresh * ts.num_samples
-
-        for variant in ts.variants():
-
-            # Filter by MAF
-            genotypes = variant.genotypes
-            ac1 = np.sum(genotypes)
-            ac0 = len(genotypes) - ac1
-            if min(ac0, ac1) < ac_thresh:
-                continue
-
-            # Polarise 0 and 1 in genotype matrix by major allele frequency.
-            # If allele counts are the same, randomly choose a major allele.
-            if ac1 > ac0 or (ac1 == ac0 and self.rng.random() > 0.5):
-                genotypes ^= 1
-
-            n = np.random.binomial(len(variant.genotypes), p)
-            if n is not None:
-                idx = np.random.randint(0, len(variant.genotypes), size=n)
-                variant.genotypes[idx] = 1 - variant.genotypes[idx]
-
-            j = int(variant.site.position * self.fixed_dim / ts.sequence_length)
-            np.add(
-                m[:, j], variant.genotypes, out=m[:, j], where=variant.genotypes != -1
-            )
-
-        return m
-
-    def _random_sampling_geno(self, callset):
+    def random_sampling_geno(self, callset):
         """Random sampling of a genomic window with the odds weighted by
         chromosome length. If a genomic mask is given, it filters regions with
         low quantity of callable regions"""
@@ -489,7 +458,7 @@ class Genobuilder:
 
         return chroms, pos, slices
 
-    def _resize_from_ts(self, ts):
+    def resize_from_ts(self, ts):
         """Returns a genotype matrix with a fixed number of columns,
         as specified in size"""
 
@@ -516,7 +485,7 @@ class Genobuilder:
 
         return m.astype(float)
 
-    def _resize_from_zarr(self, mat, pos, alts):
+    def resize_from_zarr(self, mat, pos, alts):
         """Resizes a matrix using a sum window, given a genotype matrix,
         positions vector,sequence length and the desired fixed size
         of the new matrix"""
@@ -541,6 +510,37 @@ class Genobuilder:
 
             j = int(_pos * self.fixed_dim / self.seq_len) - 1
             np.add(m[:, j], _gt, out=m[:, j], where=_gt != -1)
+
+        return m.astype(float)
+
+    def resize_and_mutate(self, ts, p_error):
+        """Mutate a tree sequence simulation introducing sequencing errors
+        with probability p. Then, create and resize a genotype matrix"""
+
+        assert p_error is not None, "p_error is not given"
+        m = np.zeros((ts.num_samples, self.fixed_dim), dtype=int)
+        ac_thresh = self.maf_thresh * ts.num_samples
+
+        for variant in ts.variants():
+
+            genotypes = variant.genotypes
+            n = np.random.binomial(len(genotypes), p_error)
+            idx = np.random.randint(0, len(genotypes), size=n)
+            genotypes[idx] = 1 - genotypes[idx]
+
+            # Filter by MAF
+            ac1 = np.sum(genotypes)
+            ac0 = len(genotypes) - ac1
+            if min(ac0, ac1) < ac_thresh:
+                continue
+
+            # Polarise 0 and 1 in genotype matrix by major allele frequency.
+            # If allele counts are the same, randomly choose a major allele.
+            if ac1 > ac0 or (ac1 == ac0 and self.rng.random() > 0.5):
+                genotypes ^= 1
+
+            j = int(variant.site.position * self.fixed_dim / ts.sequence_length)
+            m[:, j] += genotypes
 
         return m.astype(float)
 
@@ -734,7 +734,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-m",
         "--mask-file",
-        help="Genomic mask to use for random sampling of VCF files from empirical data",
+        help="Genomic mask to use for filtering empirical genomic data from VCF files",
         default="",
         type=str,
     )
@@ -767,7 +767,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     params_dict = OrderedDict()
 
-
     params_dict["r"] = Parameter(
         "r", 1.25e-8, 1e-9, (1e-10, 1e-7), inferable=False, plotlog=True
     )
@@ -782,6 +781,9 @@ if __name__ == "__main__":
     params_dict["T2"] = Parameter("T2", 500, 1000, (100, 1500), inferable=False)
     params_dict["N2"] = Parameter("N2", 5000, 20000, (1000, 30000), inferable=True)
     params_dict["growth"] = Parameter("growth", 0.01, 0.02, (0, 0.05), inferable=True)
+    params_dict["seqerr"] = Parameter(
+        "seqerr", None, 0.001, (0.00001, 0.01), inferable=False
+    )
 
     # For onepop_migration model:
     """
