@@ -6,11 +6,10 @@ def onepop_constant(args):
     """Single population model with pop size Ne and constant growth"""
 
     genob, params, randomize, i, proposals = args
-
     necessary_params = ["mu", "r", "Ne"]
-    assert sorted(necessary_params) == sorted(
-        list(params.keys())
-    ), "Invalid combination of parameters. Needed: mu | r | Ne"
+    for p in necessary_params:
+        if p not in list(params.keys()):
+            print("Invalid combination of parameters. Needed: mu | r | Ne")
 
     if proposals:
         mu, r, Ne = [
@@ -28,7 +27,7 @@ def onepop_constant(args):
         length=genob.seq_len,
         mutation_rate=mu,
         recombination_rate=r,
-        random_seed=genob.seed,
+        # random_seed=genob.seed,
     )
 
     return ts
@@ -40,9 +39,11 @@ def onepop_exp(args):
 
     genob, params, randomize, i, proposals = args
     necessary_params = ["mu", "r", "T1", "N1", "T2", "N2", "growth"]
-    assert sorted(necessary_params) == sorted(
-        list(params.keys())
-    ), "Invalid combination of parameters. Needed: mu | r | T1 | N1 | T2 | N2 | growth"
+    for p in necessary_params:
+        if p not in list(params.keys()):
+            print(
+                "Invalid combination of parameters. Needed: mu | r | T1 | N1 | T2 | N2 | growth"
+            )
 
     if proposals:
         mu, r, T1, N1, T2, N2, growth = [
@@ -53,7 +54,7 @@ def onepop_exp(args):
         mu, r, T1, N1, T2, N2, growth = [
             params[p].rand() if randomize else params[p].val for p in necessary_params
         ]
-        
+
     N0 = N2 / math.exp(-growth * T2)
 
     # Time is given in generations unit (t/25)
@@ -69,7 +70,7 @@ def onepop_exp(args):
         length=genob.seq_len,
         mutation_rate=mu,
         recombination_rate=r,
-        random_seed=genob.seed,
+        # random_seed=genob.seed,
     )
 
     return ts
@@ -81,10 +82,11 @@ def onepop_migration(args):
 
     genob, params, randomize, i, proposals = args
     necessary_params = ["mu", "r", "T1", "N1", "N2", "mig"]
-    assert sorted(necessary_params) == sorted(list(params.keys())), (
-        "Invalid combination of parameters. Needed: mu | r | T1 | N1 | N2 | mig \n"
-        f"Obtained: {list(params.keys())}"
-    )
+    for p in necessary_params:
+        if p not in list(params.keys()):
+            print(
+                "Invalid combination of parameters. Needed: mu | r | T1 | N1 | N2 | mig"
+            )
 
     if proposals:
         mu, r, T1, N1, N2, mig = [
@@ -110,7 +112,7 @@ def onepop_migration(args):
         length=genob.seq_len,
         mutation_rate=mu,
         recombination_rate=r,
-        random_seed=genob.seed,
+        # random_seed=genob.seed,
     )
 
     return ts
