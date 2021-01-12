@@ -56,7 +56,7 @@ if __name__ == "__main__":
         "--vcf-files",
         help="Path pointing to the first of the VCF files to be parsed. "
         "The files can be zipped as .gz. Data transfer is quicker when "
-        "the files are indexed with Tabix, ending in .tbi.",
+        "the files are indexed with Tabix, with an index file ending in .tbi.",
         type=str,
     )
 
