@@ -38,57 +38,66 @@ class MCMCGAN:
 
     # Where `D(x)` is the average discriminator output from n independent
     # simulations (which are simulated with parameters `x`).
-    def _unnormalized_log_prob(self, x):
+    def _target_log_prob(self, *x):
 
         proposals = copy.deepcopy(self.genob.params)
         i = 0
-        x = x.numpy()
+        tf.print(x)
         for p in proposals:
             if proposals[p].inferable:
-                if not (proposals[p].bounds[0] < x[i] < proposals[p].bounds[1]):
-                    # We reject these parameter values by returning probability 0.
-                    return -np.inf
-                proposals[p].val = x[i]
+                proposals[p].val = x[0][i].numpy()
                 i += 1
 
-        score = tf.convert_to_tensor(self.D(proposals), tf.float32)
+        score = tf.cast(self.D(proposals), tf.float32)
+        print(tf.math.log(score))
         return tf.math.log(score)
 
-    def unnormalized_log_prob(self, x):
-        return tf.py_function(self._unnormalized_log_prob, inp=[x], Tout=tf.float32)
+    def target_log_prob(self, *x):
+        return tf.py_function(self._target_log_prob, inp=[x], Tout=tf.float32)
 
     def setup_mcmc(
         self,
         num_mcmc_results,
         num_burnin_steps,
-        inits,
-        step_sizes,
         thinning,
     ):
 
         tf.config.run_functions_eagerly(True)
         self.num_mcmc_results = num_mcmc_results
         self.num_burnin_steps = num_burnin_steps
-        self.inits = tf.constant(inits, tf.float32)
-        self.step_sizes = tf.constant(step_sizes, tf.float32)
         self.thinning = thinning
         self.samples = None
         self.stats = None
+        tfb = tfp.bijectors
+
+        self.bijs, self.inits, self.step_size = [], [], []
+        for p in self.genob.params.values():
+            if p.inferable:
+                self.bijs.append(tfb.Sigmoid(
+                    low=tf.cast(p.bounds[0], tf.float32),
+                    high=tf.cast(p.bounds[1], tf.float32)
+                    ),
+                )
+                self.inits.append(tf.cast(p.initial_guess, tf.float32))
+                self.step_size.append(tf.cast(p.initial_guess*0.1, tf.float32))
 
         if self.kernel_name not in ["hmc", "nuts"]:
             raise NameError("kernel value must be either hmc or nuts")
 
         # Create and set up the HMC sampler
         elif self.kernel_name == "hmc":
-            mcmc = tfp.mcmc.HamiltonianMonteCarlo(
-                target_log_prob_fn=self.unnormalized_log_prob,
-                num_leapfrog_steps=10,
-                step_size=self.step_sizes,
-            )
+            mcmc = tfp.mcmc.TransformedTransitionKernel(
+                tfp.mcmc.HamiltonianMonteCarlo(
+                    target_log_prob_fn=self.target_log_prob,
+                    num_leapfrog_steps=6,
+                    step_size=self.step_size,
+                ),
+                bijector=self.bijs
+                )
 
             # Step size adaptation to target_acc_prob during the burn-in stage
             self.mcmc_kernel = tfp.mcmc.SimpleStepSizeAdaptation(
-                mcmc,
+                inner_kernel=mcmc,
                 num_adaptation_steps=int(self.num_burnin_steps * 0.8),
                 target_accept_prob=0.70,
             )
@@ -97,7 +106,7 @@ class MCMCGAN:
         # Good NUTS tutorial: https://adamhaber.github.io/post/nuts/
         elif self.kernel_name == "nuts":
             mcmc = tfp.mcmc.NoUTurnSampler(
-                target_log_prob_fn=self.unnormalized_log_prob,
+                target_log_prob_fn=self.target_log_prob,
                 step_size=self.step_sizes,
                 max_tree_depth=6,
             )
