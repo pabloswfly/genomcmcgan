@@ -25,14 +25,13 @@ class MCMCGAN:
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.iter = 0
 
-    def D(self, x, num_reps=32):
+    def D(self):
         """
         Simulate with parameters `x`, then classify the simulations with the
         discriminator. Returns the average over `num_replicates` simulations.
         """
 
-        self.genob.num_reps = num_reps
-        genmats = torch.Tensor(self.genob.simulate_msprime(x)).to(self.device)
+        genmats = torch.Tensor(self.genob.simulate_msprime(self.proposals)).to(self.device)
         out = self.discriminator.module.predict(genmats).cpu().numpy()
         return np.mean(out.astype(np.float32))
 
@@ -40,107 +39,110 @@ class MCMCGAN:
     # simulations (which are simulated with parameters `x`).
     def _target_log_prob(self, *x):
 
-        proposals = copy.deepcopy(self.genob.params)
-        i = 0
-        tf.print(x)
-        for p in proposals:
-            if proposals[p].inferable:
-                proposals[p].val = x[0][i].numpy()
-                i += 1
+        for i, p in enumerate(self.genob.inferable_params):
+            self.proposals[p.name].val = x[i].numpy()
 
-        score = tf.cast(self.D(proposals), tf.float32)
-        print(tf.math.log(score))
+        score = tf.cast(self.D(), tf.float32)
+        #tf.print(score)
         return tf.math.log(score)
 
     def target_log_prob(self, *x):
-        return tf.py_function(self._target_log_prob, inp=[x], Tout=tf.float32)
+        return tf.py_function(self._target_log_prob, inp=x, Tout=tf.float32)
 
     def setup_mcmc(
         self,
         num_mcmc_results,
         num_burnin_steps,
         thinning,
+        num_reps_Dx,
     ):
 
         tf.config.run_functions_eagerly(True)
+        self.proposals = copy.deepcopy(self.genob.params)
         self.num_mcmc_results = num_mcmc_results
         self.num_burnin_steps = num_burnin_steps
         self.thinning = thinning
+        self.genob.num_reps = num_reps_Dx
         self.samples = None
         self.stats = None
         tfb = tfp.bijectors
 
-        self.bijs, self.inits, self.step_size = [], [], []
-        for p in self.genob.params.values():
-            if p.inferable:
-                self.bijs.append(tfb.Sigmoid(
-                    low=tf.cast(p.bounds[0], tf.float32),
-                    high=tf.cast(p.bounds[1], tf.float32)
-                    ),
-                )
-                self.inits.append(tf.cast(p.initial_guess, tf.float32))
-                self.step_size.append(tf.cast(p.initial_guess*0.1, tf.float32))
+        self.bijs, self.inits, self.step_sizes = [], [], []
+        for p in self.genob.inferable_params:
+            self.bijs.append(tfb.Sigmoid(
+                low=tf.cast(p.bounds[0], tf.float32),
+                high=tf.cast(p.bounds[1], tf.float32)
+                ),
+            )
+            self.inits.append(tf.cast(p.init, tf.float32))
+            self.step_sizes.append(tf.cast(p.step_size, tf.float32))
 
         if self.kernel_name not in ["hmc", "nuts"]:
             raise NameError("kernel value must be either hmc or nuts")
 
         # Create and set up the HMC sampler
         elif self.kernel_name == "hmc":
-            mcmc = tfp.mcmc.TransformedTransitionKernel(
+            sampler = tfp.mcmc.TransformedTransitionKernel(
                 tfp.mcmc.HamiltonianMonteCarlo(
                     target_log_prob_fn=self.target_log_prob,
                     num_leapfrog_steps=6,
-                    step_size=self.step_size,
+                    step_size=self.step_sizes,
                 ),
                 bijector=self.bijs
                 )
 
             # Step size adaptation to target_acc_prob during the burn-in stage
             self.mcmc_kernel = tfp.mcmc.SimpleStepSizeAdaptation(
-                inner_kernel=mcmc,
+                inner_kernel=sampler,
                 num_adaptation_steps=int(self.num_burnin_steps * 0.8),
-                target_accept_prob=0.70,
+                target_accept_prob=0.75,
             )
 
         # Create and set up the NUTS sampler
         # Good NUTS tutorial: https://adamhaber.github.io/post/nuts/
         elif self.kernel_name == "nuts":
-            mcmc = tfp.mcmc.NoUTurnSampler(
-                target_log_prob_fn=self.target_log_prob,
-                step_size=self.step_sizes,
-                max_tree_depth=6,
+            sampler = tfp.mcmc.TransformedTransitionKernel(
+                tfp.mcmc.NoUTurnSampler(
+                    target_log_prob_fn=self.target_log_prob,
+                    step_size=self.step_sizes,
+                    max_tree_depth=8,
+            ),
+            bijector=self.bijs
             )
 
             # Step size adaptation to target_acc_prob during the burn-in stage
             self.mcmc_kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
-                inner_kernel=mcmc,
+                inner_kernel=sampler,
                 num_adaptation_steps=int(self.num_burnin_steps * 0.8),
-                target_accept_prob=0.70,
+                target_accept_prob=0.75,
+                # NUTS inside of a TTK requires custom getter/setter functions.
                 step_size_setter_fn=lambda pkr, new_step_size: pkr._replace(
-                    step_size=new_step_size
-                ),
-                step_size_getter_fn=lambda pkr: pkr.step_size,
-                log_accept_prob_getter_fn=lambda pkr: pkr.log_accept_ratio,
+                    inner_results=pkr.inner_results._replace(step_size=new_step_size)
+                    ),
+                step_size_getter_fn=lambda pkr: pkr.inner_results.step_size,
+                log_accept_prob_getter_fn=lambda pkr: pkr.inner_results.log_accept_ratio,
             )
 
     def trace_fn_nuts(self, _, pkr):
         """Trace function to collect stats during NUTS sampling"""
+        results = pkr.inner_results.inner_results.inner_results
         return (
-            pkr.inner_results.inner_results.target_log_prob,
-            pkr.inner_results.inner_results.leapfrogs_taken,
-            pkr.inner_results.inner_results.has_divergence,
-            pkr.inner_results.inner_results.energy,
-            pkr.inner_results.inner_results.is_accepted,
-            pkr.inner_results.inner_results.log_accept_ratio,
+            results.target_log_prob,
+            results.leapfrogs_taken,
+            results.has_divergence,
+            results.energy,
+            results.is_accepted,
+            results.log_accept_ratio,
         )
 
     def trace_fn_hmc(self, _, pkr):
         """Trace function to collect stats during HMC sampling"""
+        results = pkr.inner_results.inner_results.inner_results
         return (
-            pkr.inner_results.inner_results.accepted_results.target_log_prob,
-            ~(pkr.inner_results.inner_results.log_accept_ratio > -1000.0),
-            pkr.inner_results.inner_results.is_accepted,
-            pkr.inner_results.inner_results.accepted_results.step_size,
+            results.accepted_results.target_log_prob,
+            ~(results.log_accept_ratio > -1000.0),
+            results.is_accepted,
+            results.accepted_results.step_size,
         )
 
     # autograph=False is recommended by the TFP team. It is related to how
@@ -179,20 +181,21 @@ class MCMCGAN:
         print("sampling finished")
 
         # Collect the samples and stats. Download as a pickle file
-        self.samples = samples.numpy()
-        self.stats = [s.numpy() for s in stats]
+        #self.samples = [s[stats[2]].numpy() for s in samples]
+        self.samples = [s.numpy() for s in samples]
+        self.stats = stats
         pack = [self.samples, self.stats]
         with open(f"./results/output_it{self.iter}.pkl", "wb") as obj:
             pickle.dump(pack, obj, protocol=pickle.HIGHEST_PROTOCOL)
 
-    def result_to_stats(self, params):
+    def result_to_stats(self):
         """Convert results from running the MCMC chain into a posterior list
         and sample_stats list that can be given to Arviz for visualizations"""
 
         # Stats for HMC kernel
         if self.kernel_name == "hmc":
             stats_names = ["logprob", "diverging", "acceptance", "step_size"]
-            sample_stats = {k: v.T for k, v in zip(stats_names, self.stats)}
+            sample_stats = {k: v for k, v in zip(stats_names, self.stats)}
 
         # Stats for NUTS kernel
         elif self.kernel_name == "nuts":
@@ -204,23 +207,24 @@ class MCMCGAN:
                 "acceptance",
                 "mean_tree_accept",
             ]
-            sample_stats = {k: v.T for k, v in zip(stats_names, self.stats)}
+            sample_stats = {k: v for k, v in zip(stats_names, self.stats)}
             # sample_stats['tree_size'] = np.diff(sample_stats['tree_size'], axis=1)
 
         # Samples from the posterior distribution
-        var_names = [p.name for p in params]
-        posterior = {k: v for k, v in zip(var_names, self.samples.T)}
+        var_names = [p.name for p in self.genob.inferable_params]
+        posterior = {k: v for k, v in zip(var_names, self.samples)}
+        print(f'Acceptance probability is: {np.mean(sample_stats["acceptance"])}')
 
         return posterior, sample_stats
 
-    def hist_samples(self, params, bins=10):
+    def hist_samples(self, bins=10):
         """Plot a histogram of the collected samples for a given parameter"""
 
         colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
         sns.set_style("darkgrid")
         plt.clf()
-        for i, p in enumerate(params):
-            sns.distplot(self.samples[:, i], color=colors[i])
+        for i, p in enumerate(self.genob.inferable_params):
+            sns.distplot(self.samples[i], color=colors[i])
             ymax = plt.ylim()[1]
             if self.genob.source == "msprime":
                 plt.vlines(p.val, 0, ymax, color=colors[i])
@@ -237,15 +241,15 @@ class MCMCGAN:
             )
             plt.clf()
 
-    def traceplot_samples(self, params):
+    def traceplot_samples(self):
         """Plot a traceplot of the MCMC chain states for a given parameter"""
 
         # EXPAND COLORS FOR MORE PARAMETERS
         colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
         sns.set_style("darkgrid")
         plt.clf()
-        for i, p in enumerate(params):
-            plt.plot(self.samples[:, i], c=colors[i], alpha=0.3)
+        for i, p in enumerate(self.genob.inferable_params):
+            plt.plot(self.samples[i], c=colors[i], alpha=0.3)
             if self.genob.source == "msprime":
                 plt.hlines(
                     p.val,
@@ -267,15 +271,16 @@ class MCMCGAN:
             )
             plt.clf()
 
-    def jointplot_samples(self, params):
+    def jointplot_samples(self):
         """Plot a jointplot of two variables with marginal density histograms"""
 
+        params = self.genob.inferable_params
         log = [p.plotlog for p in params]
         plt.clf()
 
         g = sns.jointplot(
-            x=self.samples[:, 0],
-            y=self.samples[:, 1],
+            x=self.samples[0],
+            y=self.samples[1],
             kind="hist",
             bins=30,
             log_scale=log[:2],
