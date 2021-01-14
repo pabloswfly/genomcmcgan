@@ -94,6 +94,7 @@ class Genobuilder:
 
         self._sim_source = sim_source
         self._params = params
+        self.inferable_params = [p for p in self.params.values() if p.inferable]
 
     @property
     def num_samples(self):
