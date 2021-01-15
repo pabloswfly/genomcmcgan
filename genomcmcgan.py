@@ -94,11 +94,9 @@ def run_genomcmcgan(
         # Calculate means and standard deviation for next MCMC sampling step
         means = np.mean(mcmcgan.samples, axis=1)
         stds = np.std(mcmcgan.samples, axis=1)
-        percentiles = np.percentile(mcmcgan.samples, [2.5, 97.5], axis=1)
         for i, p in enumerate(mcmcgan.genob.inferable_params):
             # Update the MCMC stats for each parameter
             print(f"{p.name} samples with mean {means[i]} and std {stds[i]}")
-            p.bounds = tuple(percentiles[:, i])
             p.proposals = mcmcgan.samples[i]
             p.init = means[i]
 
