@@ -52,6 +52,7 @@ def run_genomcmcgan(
         mcmcgan.discriminator = nn.DataParallel(mcmcgan.discriminator)
     mcmcgan.discriminator.to(device)
 
+    print(f"Demographic model for inference - {mcmcgan.genob.demo_model}")
     for p in mcmcgan.genob.params.values():
         print(f"{p.name} inferable: {p.inferable}")
 
@@ -83,7 +84,7 @@ def run_genomcmcgan(
 
         # Obtain posterior samples and stats for plotting and diagnostics
         posterior, sample_stats = mcmcgan.result_to_stats()
-        mcmc_diagnostic_plots(posterior, sample_stats)
+        mcmc_diagnostic_plots(posterior, sample_stats, it=mcmcgan.iter)
 
         # Draw traceplot and histogram of collected samples
         mcmcgan.traceplot_samples()
@@ -98,7 +99,7 @@ def run_genomcmcgan(
             # Update the MCMC stats for each parameter
             print(f"{p.name} samples with mean {means[i]} and std {stds[i]}")
             p.proposals = mcmcgan.samples[i]
-            p.init = means[i]
+            p.init = mcmcgan.samples[i][-1]
 
         # Generate new batches of real data and updated simulated data
         xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(
