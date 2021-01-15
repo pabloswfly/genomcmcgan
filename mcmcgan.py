@@ -39,6 +39,7 @@ class MCMCGAN:
     # simulations (which are simulated with parameters `x`).
     def _target_log_prob(self, *x):
 
+        tf.print(x)
         for i, p in enumerate(self.genob.inferable_params):
             self.proposals[p.name].val = x[i].numpy()
 
@@ -157,7 +158,7 @@ class MCMCGAN:
             self.trace_fn_nuts if self.kernel_name == "nuts" else self.trace_fn_hmc
         )
 
-        tf_seed = tf.constant(self.seed)
+        tf_seed = tf.constant(self.seed) if self.seed else None
         print(f"Selected mcmc kernel is {self.kernel_name}")
 
         # Add a progress bar for the chain sampling iterations
