@@ -162,44 +162,46 @@ def plot_average(x, y, param_name, name, log_scale, bins=10):
     plt.clf()
 
 
-def mcmc_diagnostic_plots(posterior, sample_stats):
+def mcmc_diagnostic_plots(posterior, sample_stats, it):
 
     az_trace = az.from_dict(posterior=posterior, sample_stats=sample_stats)
 
     ax = az.plot_trace(az_trace, divergences=False)
     fig = ax.ravel()[0].figure
-    fig.savefig("./results/trace_plot.png")
+    fig.savefig(f"./results/trace_plot_it{it}.png")
     plt.clf()
 
-    ax = az.plot_pair(az_trace, kind="hexbin", gridsize=30, marginals=True)
-    fig = ax.ravel()[0].figure
-    fig.savefig("./results/pair_plot.png")
-    plt.clf()
+    # 2 parameters or more for these pair plots
+    if len(az_trace.posterior.data_vars) > 1:
+        ax = az.plot_pair(az_trace, kind="hexbin", gridsize=30, marginals=True)
+        fig = ax.ravel()[0].figure
+        fig.savefig(f"./results/pair_plot_it{it}.png")
+        plt.clf()
 
-    ax = az.plot_pair(
-        az_trace,
-        kind=["scatter", "kde"],
-        kde_kwargs={"fill_last": False},
-        point_estimate="mean",
-        marginals=True,
-    )
-    fig = ax.ravel()[0].figure
-    fig.savefig("./results/point_estimate_plot.png")
-    plt.clf()
+        ax = az.plot_pair(
+            az_trace,
+            kind=["scatter", "kde"],
+            kde_kwargs={"fill_last": False},
+            point_estimate="mean",
+            marginals=True,
+        )
+        fig = ax.ravel()[0].figure
+        fig.savefig(f"./results/point_estimate_plot_it{it}.png")
+        plt.clf()
 
     ax = az.plot_posterior(az_trace)
     fig = ax.ravel()[0].figure
-    fig.savefig("./results/posterior_plot.png")
+    fig.savefig(f"./results/posterior_plot_it{it}.png")
     plt.clf()
 
     lag = np.minimum(len(list(posterior.values())[0]), 100)
     ax = az.plot_autocorr(az_trace, max_lag=lag)
     fig = ax.ravel()[0].figure
-    fig.savefig("./results/autocorr_plot.png")
+    fig.savefig(f"./results/autocorr_plot_it{it}.png")
     plt.clf()
 
     ax = az.plot_ess(az_trace, kind="evolution")
     fig = ax.ravel()[0].figure
-    fig.savefig("./results/ess_evolution_plot.png")
+    fig.savefig(f"./results/ess_evolution_plot_it{it}.png")
     plt.clf()
     plt.close()
