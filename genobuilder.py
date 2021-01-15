@@ -29,7 +29,15 @@ def do_sim(args):
 
     # Perform simulation with chosen demographic model
     genob, params = args[0:2]
-    ts = dm.onepop_exp(args)
+    if genob.demo_model == "constant":
+        ts = dm.constant(args)
+    elif genob.demo_model == "exponential":
+        ts = dm.exponential(args)
+    elif genob.demo_model == "zigzag":
+        ts = dm.zigzag(args)
+    elif genob.demo_model == "ghost_migration":
+        ts = dm.ghost_migration(args)
+
     if params["seqerr"].inferable:
         # Return resized matrix
         return genob.resize_and_mutate(ts, params["seqerr"].val)
@@ -67,6 +75,7 @@ class Genobuilder:
     def __init__(
         self,
         source,
+        demo_model,
         num_samples,
         seq_len,
         maf_thresh,
@@ -81,6 +90,7 @@ class Genobuilder:
         self._seq_len = seq_len
         self._maf_thresh = maf_thresh
         self._source = source
+        self._demo_model = demo_model
         self._fixed_dim = fixed_dim
         self._seed = seed
         self._num_reps = None
@@ -111,6 +121,10 @@ class Genobuilder:
     @property
     def source(self):
         return self._source
+
+    @property
+    def demo_model(self):
+        return self._demo_model
 
     @property
     def fixed_dim(self):
@@ -168,9 +182,18 @@ class Genobuilder:
     def source(self, s):
         if s not in ["msprime", "stdpopsim", "empirical"]:
             raise ValueError(
-                "Genobuilder source must be either msprime, " "stdpopsim or empirical"
+                "Genobuilder source must be either msprime, stdpopsim or empirical"
             )
         self._source = s
+
+    @demo_model.setter
+    def demo_model(self, m):
+        if m not in ["constant", "exponential", "zigzag", "ghost_migration"]:
+            raise ValueError(
+                "Genobuilder demographic model must be either constant, " \
+                "exponential, zigzag or ghost_migration"
+            )
+        self._demo_model = m
 
     @fixed_dim.setter
     def fixed_dim(self, f):
@@ -678,6 +701,12 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "demographic_model",
+        help="One population demographic model to use for simulations in msprime.",
+        choices=["constant", "exponential", "zigzag", "ghost_migration"],
+    )
+
+    parser.add_argument(
         "-s",
         "--source",
         help="Source engine for the genotype matrices from the real dataset to infer",
@@ -768,6 +797,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     params_dict = OrderedDict()
 
+    # General parameters for all models
     params_dict["r"] = Parameter(
         "r", 1.25e-8, 1e-9, (1e-10, 1e-7), inferable=False, plotlog=True
     )
@@ -775,18 +805,31 @@ if __name__ == "__main__":
         "mu", 1.25e-8, 1e-9, (1e-11, 1e-7), inferable=False, plotlog=True
     )
     # params_dict["Ne"] = Parameter("Ne", 10000, 14000, (5000, 15000), inferable=False)
-
-    # For onepop_exp model:
-    params_dict["T1"] = Parameter("T1", 3000, 4000, (1500, 5000), inferable=True)
-    params_dict["N1"] = Parameter("N1", 10000, 20000, (1000, 30000), inferable=True)
-    params_dict["T2"] = Parameter("T2", 500, 1000, (100, 1500), inferable=False)
-    params_dict["N2"] = Parameter("N2", 5000, 20000, (1000, 30000), inferable=True)
-    params_dict["growth"] = Parameter("growth", 0.01, 0.02, (0, 0.05), inferable=True)
     params_dict["seqerr"] = Parameter(
         "seqerr", None, 0.001, (0.00001, 0.01), inferable=False
     )
 
-    # For onepop_migration model:
+    """
+    # Parameters for exponential model: FIX  INIT   BOUNDS      INFERABLE
+    params_dict["T1"] = Parameter("T1", 500, 1000, (100, 1500), inferable=False)
+    params_dict["N1"] = Parameter("N1", 10000, 20000, (1000, 30000), inferable=False)
+    params_dict["T2"] = Parameter("T2", 3000, 4000, (1500, 5000), inferable=False)
+    params_dict["N2"] = Parameter("N2", 5000, 20000, (1000, 30000), inferable=False)
+    params_dict["growth"] = Parameter("growth", 0.01, 0.02, (0, 0.05), inferable=True)
+    """
+    # Parameters for zigzag model:      FIX  INIT   BOUNDS      INFERABLE
+    params_dict["T1"] = Parameter("T1", 33, 50, (1, 80), inferable=False)
+    params_dict["N1"] = Parameter("N1", 6000, 10000, (1431, 14312), inferable=True)
+    params_dict["T2"] = Parameter("T2", 133, 200, (81, 400), inferable=False)
+    params_dict["N2"] = Parameter("N2", 7000, 10000, (1431, 14312), inferable=True)
+    params_dict["T3"] = Parameter("T3", 533, 1000, (401, 1500), inferable=False)
+    params_dict["N3"] = Parameter("N3", 3000, 10000, (1431, 14312), inferable=True)
+    params_dict["T4"] = Parameter("T4", 2133, 4000, (1501, 5000), inferable=False)
+    params_dict["N4"] = Parameter("N4", 4000, 10000, (1431, 14312), inferable=True)
+    params_dict["T5"] = Parameter("T5", 8533, 7500, (5001, 10000), inferable=False)
+    params_dict["N5"] = Parameter("N5", 2000, 10000, (1431, 14312), inferable=True)
+
+    # Parameters for ghost_migration model:
     """
     params_dict["T1"] = Parameter("T1", 1000, 4000, (500, 5000), inferable=False)
     params_dict["N1"] = Parameter("N1", 5000, 18000, (1000, 20000), inferable=False)
@@ -797,6 +840,7 @@ if __name__ == "__main__":
     # Build the Genobuilder object
     genob = Genobuilder(
         source=args.source,
+        demo_model=args.demographic_model,
         num_samples=args.number_haplotypes,
         seq_len=args.sequence_length,
         maf_thresh=args.maf_threshold,
