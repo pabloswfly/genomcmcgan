@@ -10,15 +10,17 @@ In a standard GAN, two neural networks called the Discriminator (D) and the Gene
 The script genobuilder.py contains the tools to create a Genobuilder() object. This data object can generate genotype matrices from variant data under a demographic scenario. The data can be generated from different sources, such as msprime, stdpopsim and empirical data coming from VCF files. The script can be run in the console, with a command like:
 The script `genobuilder.py` contains the tools to create a Genobuilder() object. This data object can generate genotype matrices from variant data under a demographic scenario. The data can be generated from different sources, such as msprime, stdpopsim and empirical data coming from VCF files. The script can be run in the console, with a command like:
 
-> python genobuilder.py download_genmats -s msprime -n 1000 -nh 99 -l 1e6 -maf 0.05 -f 128 -se 2020 -o my_geno -p 16
+> python genobuilder.py download_genmats exponential -s msprime -n 1000 -nh 99 -l 1e6 -maf 0.05 -f 128 -se 2020 -o my_geno -p 16
 
 Or using the long flags:
 
-> python genobuilder.py download_genmats --source msprime --num-rep 1000  --number-haplotypes 99 --sequence.length 1e6 --maf-threshold 0.05 --fixed-dimension 128 --seed 2020 --output my_geno --parallelism 16
+> python genobuilder.py download_genmats exponential --source msprime --num-rep 1000  --number-haplotypes 99 --sequence.length 1e6 --maf-threshold 0.05 --fixed-dimension 128 --seed 2020 --output my_geno --parallelism 16
 
 The different arguments and flags are:
 
 - **function:** Function to perform. Choices are `init` (output is just the genobuilder object) or `download_genmats` (output are the genobuilder object and -n genotype matrices).
+
+- **demographic_model:** One population demographic model to use for simulations in msprime. Choices are `constant`, `exponential`, `zigzag`, `ghost_migration`. See demography.py for more details.
 
 - **-s/--source:** Source engine for the genotype matrices from the real dataset to infer. Choices are `msprime`, `stdpopsim` or `empirical`. `msprime` is selected by default.
 
@@ -44,7 +46,7 @@ The different arguments and flags are:
 
 For simplicity, the default parameters work pretty good, so we recommend to run:
 
-> python genobuilder.py download_genmats -n 1000 -o my_geno
+> python genobuilder.py download_genmats exponential -n 1000 -o my_geno
 
 In order to build a Genobuilder() object and genotype matrices from `empirical` source, the population-specific variant data contained in VCF files must be parsed to Zarr-compressed files. For that end, the `vcf2zarr.py` module must be executed before calling `genobuilder.py`. An example command to construct the Zarr files:
 
