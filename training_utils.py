@@ -2,6 +2,7 @@ import imageio
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+import arviz as az
 from tensorflow import keras
 from sklearn.metrics import confusion_matrix
 
@@ -159,3 +160,46 @@ def plot_average(x, y, param_name, name, log_scale, bins=10):
     plt.ylim((0, 1))
     plt.savefig(f"./results/{name}.png")
     plt.clf()
+
+
+def mcmc_diagnostic_plots(posterior, sample_stats):
+
+    az_trace = az.from_dict(posterior=posterior, sample_stats=sample_stats)
+
+    ax = az.plot_trace(az_trace, divergences=False)
+    fig = ax.ravel()[0].figure
+    fig.savefig("./results/trace_plot.png")
+    plt.clf()
+
+    ax = az.plot_pair(az_trace, kind="hexbin", gridsize=30, marginals=True)
+    fig = ax.ravel()[0].figure
+    fig.savefig("./results/pair_plot.png")
+    plt.clf()
+
+    ax = az.plot_pair(
+        az_trace,
+        kind=["scatter", "kde"],
+        kde_kwargs={"fill_last": False},
+        point_estimate="mean",
+        marginals=True,
+    )
+    fig = ax.ravel()[0].figure
+    fig.savefig("./results/point_estimate_plot.png")
+    plt.clf()
+
+    ax = az.plot_posterior(az_trace)
+    fig = ax.ravel()[0].figure
+    fig.savefig("./results/posterior_plot.png")
+    plt.clf()
+
+    lag = np.minimum(len(list(posterior.values())[0]), 100)
+    ax = az.plot_autocorr(az_trace, max_lag=lag)
+    fig = ax.ravel()[0].figure
+    fig.savefig("./results/autocorr_plot.png")
+    plt.clf()
+
+    ax = az.plot_ess(az_trace, kind="evolution")
+    fig = ax.ravel()[0].figure
+    fig.savefig("./results/ess_evolution_plot.png")
+    plt.clf()
+    plt.close()

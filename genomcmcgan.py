@@ -4,11 +4,11 @@ import time
 import argparse
 import torch
 import torch.nn as nn
-import arviz as az
 import numpy as np
 from mcmcgan import MCMCGAN
 from discriminator import Discriminator
 from genobuilder import Genobuilder
+from training_utils import mcmc_diagnostic_plots
 
 
 def run_genomcmcgan(
@@ -52,74 +52,15 @@ def run_genomcmcgan(
         mcmcgan.discriminator = nn.DataParallel(mcmcgan.discriminator)
     mcmcgan.discriminator.to(device)
 
-    # Prepare tensors and data loaders with the data and labels
-    xtrain = torch.Tensor(xtrain).float().to(device)
-    ytrain = torch.Tensor(ytrain).float().unsqueeze(-1).to(device)
-    trainset = torch.utils.data.TensorDataset(xtrain, ytrain)
-    trainflow = torch.utils.data.DataLoader(trainset, 32, True)
-    xval = torch.Tensor(xval).float().to(device)
-    yval = torch.Tensor(yval).float().unsqueeze(-1).to(device)
-    valset = torch.utils.data.TensorDataset(xval, yval)
-    valflow = torch.utils.data.DataLoader(valset, 32, True)
-
-    # After wrapping the cnn model with DataParallel, -.module.- is necessary
-    mcmcgan.discriminator.module.fit(trainflow, valflow, epochs, lr=0.0001)
-
-    # Create a list with the parameters to infer
-    inferable_params = []
     for p in mcmcgan.genob.params.values():
         print(f"{p.name} inferable: {p.inferable}")
-        if p.inferable:
-            inferable_params.append(p)
 
-    # Obtain initial chain states and initial step sizes, and set up the MCMC
-    inits = [p.initial_guess for p in inferable_params]
-    step_sizes = [(p.initial_guess * 0.1) for p in inferable_params]
-    mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 1)
-
-    max_num_iters = 5
+    max_num_iters = 10
     convergence = False
 
     while not convergence and max_num_iters != mcmcgan.iter:
 
-        mcmcgan.iter += 1
-        print(f"Starting the MCMC sampling chain for iteration {mcmcgan.iter}")
-        start_t = time.time()
-
-        # Run the MCMC sampling step
-        mcmcgan.run_chain()
-
-        # Obtain posterior samples and stats for plotting and diagnostics
-        posterior, sample_stats = mcmcgan.result_to_stats(inferable_params)
-        az_trace = az.from_dict(posterior=posterior, sample_stats=sample_stats)
-        az.plot_trace(az_trace, compact=True, divergences=False)
-
-        # Draw traceplot and histogram of collected samples
-        mcmcgan.traceplot_samples(inferable_params)
-        mcmcgan.hist_samples(inferable_params)
-        if mcmcgan.samples.shape[1] > 1:
-            mcmcgan.jointplot_samples(inferable_params)
-
-        # Update the accepted proposal values for each parameter to infer
-        for i, p in enumerate(inferable_params):
-            p.proposals = mcmcgan.samples[:, i]
-
-        # Calculate means and standard deviation for next MCMC sampling step
-        means = np.mean(mcmcgan.samples, axis=0)
-        stds = np.std(mcmcgan.samples, axis=0)
-        percentiles = np.percentile(mcmcgan.samples, [2.5, 97.5], axis=0)
-        for j, p in enumerate(inferable_params):
-            print(f"{p.name} samples with mean {means[j]} and std {stds[j]}")
-            p.bounds = tuple(percentiles[:, j])
-
-        inits = means
-        step_sizes = stds
-        mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 1)
-
-        # Generate new batches of real data and updated simulated data
-        xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(
-            num_mcmc_samples, proposals=True
-        )
+        # Prepare tensors and data loaders with the data and labels
         xtrain = torch.Tensor(xtrain).float().to(device)
         ytrain = torch.Tensor(ytrain).float().unsqueeze(-1).to(device)
         trainset = torch.utils.data.TensorDataset(xtrain, ytrain)
@@ -129,8 +70,40 @@ def run_genomcmcgan(
         valset = torch.utils.data.TensorDataset(xval, yval)
         valflow = torch.utils.data.DataLoader(valset, 32, True)
 
-        # Train the discriminator on the new data
-        mcmcgan.discriminator.module.fit(trainflow, valflow, epochs, lr=0.0002)
+        # After wrapping the cnn model with DataParallel, -.module.- is necessary
+        mcmcgan.discriminator.module.fit(trainflow, valflow, epochs, lr=0.0001)
+
+        mcmcgan.iter += 1
+        mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, thinning=1, num_reps_Dx=10)
+        print(f"Starting the MCMC sampling chain for iteration {mcmcgan.iter}")
+        start_t = time.time()
+
+        # Run the MCMC sampling step
+        mcmcgan.run_chain()
+
+        # Obtain posterior samples and stats for plotting and diagnostics
+        posterior, sample_stats = mcmcgan.result_to_stats()
+        mcmc_diagnostic_plots(posterior, sample_stats)
+
+        # Draw traceplot and histogram of collected samples
+        mcmcgan.traceplot_samples()
+        mcmcgan.hist_samples()
+        if len(mcmcgan.samples) > 1:
+            mcmcgan.jointplot_samples()
+
+        # Calculate means and standard deviation for next MCMC sampling step
+        means = np.mean(mcmcgan.samples, axis=1)
+        stds = np.std(mcmcgan.samples, axis=1)
+        for i, p in enumerate(mcmcgan.genob.inferable_params):
+            # Update the MCMC stats for each parameter
+            print(f"{p.name} samples with mean {means[i]} and std {stds[i]}")
+            p.proposals = mcmcgan.samples[i]
+            p.init = means[i]
+
+        # Generate new batches of real data and updated simulated data
+        xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(
+            num_mcmc_samples, proposals=True
+        )
 
         t = time.time() - start_t
         print(f"A single iteration of the MCMC-GAN took {t} seconds")
