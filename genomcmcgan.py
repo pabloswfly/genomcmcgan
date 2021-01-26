@@ -48,7 +48,6 @@ def run_genomcmcgan(
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if torch.cuda.device_count() > 1:
         print("Using", torch.cuda.device_count(), "GPUs")
-        # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
         mcmcgan.discriminator = nn.DataParallel(mcmcgan.discriminator)
     mcmcgan.discriminator.to(device)
 
@@ -57,9 +56,14 @@ def run_genomcmcgan(
         print(f"{p.name} inferable: {p.inferable}")
 
     max_num_iters = 10
-    convergence = False
+    start_t = time.time()
+    means = [0.0]
 
-    while not convergence and max_num_iters != mcmcgan.iter:
+    while max_num_iters != mcmcgan.iter:
+
+        mcmcgan.iter += 1
+        print(f"Starting the MCMC sampling chain for iteration {mcmcgan.iter}")
+        t = time.time()
 
         # Prepare tensors and data loaders with the data and labels
         xtrain = torch.Tensor(xtrain).float().to(device)
@@ -72,14 +76,15 @@ def run_genomcmcgan(
         valflow = torch.utils.data.DataLoader(valset, 32, True)
 
         # After wrapping the cnn model with DataParallel, -.module.- is necessary
-        mcmcgan.discriminator.module.fit(trainflow, valflow, epochs, lr=0.0001)
+        best_acc = mcmcgan.discriminator.module.fit(trainflow, valflow, epochs, lr=0.0001)
 
-        mcmcgan.iter += 1
-        mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, thinning=1, num_reps_Dx=10)
-        print(f"Starting the MCMC sampling chain for iteration {mcmcgan.iter}")
-        start_t = time.time()
+        # Check for convergence
+        if best_acc < 0.55:
+            print("convergence")
+            break
 
         # Run the MCMC sampling step
+        mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, thinning=1, num_reps_Dx=10)
         mcmcgan.run_chain()
 
         # Obtain posterior samples and stats for plotting and diagnostics
@@ -92,7 +97,7 @@ def run_genomcmcgan(
         if len(mcmcgan.samples) > 1:
             mcmcgan.jointplot_samples()
 
-        # Calculate means and standard deviation for next MCMC sampling step
+        # Calculate means and standard deviations for the next MCMC sampling step
         means = np.mean(mcmcgan.samples, axis=1)
         stds = np.std(mcmcgan.samples, axis=1)
         for i, p in enumerate(mcmcgan.genob.inferable_params):
@@ -106,8 +111,8 @@ def run_genomcmcgan(
             num_mcmc_samples, proposals=True
         )
 
-        t = time.time() - start_t
-        print(f"A single iteration of the MCMC-GAN took {t} seconds")
+        print(f"A single iteration of the MCMC-GAN took {time.time()-t} seconds")
+        print(f"In total, it has been running for {time.time()-start_t} seconds")
 
     print(f"The estimates obtained after {mcmcgan.iter} iterations are:")
     print(means)
