@@ -40,7 +40,7 @@ def exponential(args):
     for p in necessary_params:
         if p not in list(params.keys()):
             print(
-                "Invalid combination of parameters. " \
+                "Invalid combination of parameters. "
                 "Needed: mu | r | T1 | N1 | T2 | N2 | growth"
             )
 
@@ -59,7 +59,7 @@ def exponential(args):
     # Time is given in generations unit (t/25)
     demographic_events = [
         msprime.PopulationParametersChange(time=0, initial_size=N0, growth_rate=growth),
-        msprime.PopulationParametersChange(time=T1, initial_size=N1, growth_rate=0),
+        msprime.PopulationParametersChange(time=T1, initial_size=N1),
         msprime.PopulationParametersChange(time=T2, initial_size=N2),
     ]
 
@@ -80,16 +80,29 @@ def zigzag(args):
     Schiffels and Durbin, 2014. https://doi.org/10.1038/ng.3015"""
 
     genob, params, randomize, i, proposals = args
-    necessary_params = ["mu", "r", "T1", "N1", "T2", "N2", "T3", "N3", "T4", "N4", "T5", "N5"]
+    necessary_params = [
+        "mu",
+        "r",
+        "T1",
+        "N1",
+        "T2",
+        "N2",
+        "T3",
+        "N3",
+        "T4",
+        "N4",
+        "T5",
+        "N5",
+    ]
     for p in necessary_params:
         if p not in list(params.keys()):
             print(
-                "Invalid combination of parameters. Needed: " \
+                "Invalid combination of parameters. Needed: "
                 "mu | r | T1 | N1 | T2 | N2 | T3 | N3 | T4 | N4 | T5 | N5"
             )
 
     if proposals:
-        mu, r, T1, N1, T2, N2, T3, N3, T4, N4, T5, N5  = [
+        mu, r, T1, N1, T2, N2, T3, N3, T4, N4, T5, N5 = [
             params[p].prop(i) if params[p].inferable else params[p].val
             for p in necessary_params
         ]
@@ -134,7 +147,7 @@ def ghost_migration(args):
     for p in necessary_params:
         if p not in list(params.keys()):
             print(
-                "Invalid combination of parameters. " \
+                "Invalid combination of parameters. "
                 "Needed: mu | r | T1 | N1 | N2 | mig"
             )
 
