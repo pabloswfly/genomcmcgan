@@ -31,7 +31,9 @@ class MCMCGAN:
         discriminator. Returns the average over `num_replicates` simulations.
         """
 
-        genmats = torch.Tensor(self.genob.simulate_msprime(self.proposals)).to(self.device)
+        genmats = torch.Tensor(self.genob.simulate_msprime(self.proposals)).to(
+            self.device
+        )
         out = self.discriminator.module.predict(genmats).cpu().numpy()
         return np.mean(out.astype(np.float32))
 
@@ -39,12 +41,11 @@ class MCMCGAN:
     # simulations (which are simulated with parameters `x`).
     def _target_log_prob(self, *x):
 
-        tf.print(x)
         for i, p in enumerate(self.genob.inferable_params):
             self.proposals[p.name].val = x[i].numpy()
 
         score = tf.cast(self.D(), tf.float32)
-        #tf.print(score)
+        # tf.print(score)
         return tf.math.log(score)
 
     def target_log_prob(self, *x):
@@ -70,9 +71,10 @@ class MCMCGAN:
 
         self.bijs, self.inits, self.step_sizes = [], [], []
         for p in self.genob.inferable_params:
-            self.bijs.append(tfb.Sigmoid(
-                low=tf.cast(p.bounds[0], tf.float32),
-                high=tf.cast(p.bounds[1], tf.float32)
+            self.bijs.append(
+                tfb.Sigmoid(
+                    low=tf.cast(p.bounds[0], tf.float32),
+                    high=tf.cast(p.bounds[1], tf.float32),
                 ),
             )
             self.inits.append(tf.cast(p.init, tf.float32))
@@ -89,8 +91,8 @@ class MCMCGAN:
                     num_leapfrog_steps=6,
                     step_size=self.step_sizes,
                 ),
-                bijector=self.bijs
-                )
+                bijector=self.bijs,
+            )
 
             # Step size adaptation to target_acc_prob during the burn-in stage
             self.mcmc_kernel = tfp.mcmc.SimpleStepSizeAdaptation(
@@ -107,8 +109,8 @@ class MCMCGAN:
                     target_log_prob_fn=self.target_log_prob,
                     step_size=self.step_sizes,
                     max_tree_depth=8,
-            ),
-            bijector=self.bijs
+                ),
+                bijector=self.bijs,
             )
 
             # Step size adaptation to target_acc_prob during the burn-in stage
@@ -119,7 +121,7 @@ class MCMCGAN:
                 # NUTS inside of a TTK requires custom getter/setter functions.
                 step_size_setter_fn=lambda pkr, new_step_size: pkr._replace(
                     inner_results=pkr.inner_results._replace(step_size=new_step_size)
-                    ),
+                ),
                 step_size_getter_fn=lambda pkr: pkr.inner_results.step_size,
                 log_accept_prob_getter_fn=lambda pkr: pkr.inner_results.log_accept_ratio,
             )
@@ -162,9 +164,9 @@ class MCMCGAN:
         print(f"Selected mcmc kernel is {self.kernel_name}")
 
         # Add a progress bar for the chain sampling iterations
-        t = self.thinning + 1
+        t = self.thinning
         pbar = tfp.experimental.mcmc.ProgressBarReducer(
-            self.num_mcmc_results * t + self.num_burnin_steps - t
+            self.num_mcmc_results * (t + 1) + self.num_burnin_steps - t
         )
         self.mcmc_kernel = tfp.experimental.mcmc.WithReductions(self.mcmc_kernel, pbar)
 
@@ -182,7 +184,7 @@ class MCMCGAN:
         print("sampling finished")
 
         # Collect the samples and stats. Download as a pickle file
-        #self.samples = [s[stats[2]].numpy() for s in samples]
+        # self.samples = [s[stats[2]].numpy() for s in samples]
         self.samples = [s.numpy() for s in samples]
         self.stats = stats
         pack = [self.samples, self.stats]
@@ -221,7 +223,7 @@ class MCMCGAN:
     def hist_samples(self, bins=10):
         """Plot a histogram of the collected samples for a given parameter"""
 
-        colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
+        colors = ["red", "blue", "green", "black", "teal", "gold", "chocolate"]
         sns.set_style("darkgrid")
         plt.clf()
         for i, p in enumerate(self.genob.inferable_params):
@@ -246,7 +248,7 @@ class MCMCGAN:
         """Plot a traceplot of the MCMC chain states for a given parameter"""
 
         # EXPAND COLORS FOR MORE PARAMETERS
-        colors = ["red", "blue", "green", "black", "gold", "chocolate", "teal"]
+        colors = ["red", "blue", "green", "black", "teal", "gold", "chocolate"]
         sns.set_style("darkgrid")
         plt.clf()
         for i, p in enumerate(self.genob.inferable_params):

@@ -190,7 +190,7 @@ class Genobuilder:
     def demo_model(self, m):
         if m not in ["constant", "exponential", "zigzag", "ghost_migration"]:
             raise ValueError(
-                "Genobuilder demographic model must be either constant, " \
+                "Genobuilder demographic model must be either constant, "
                 "exponential, zigzag or ghost_migration"
             )
         self._demo_model = m
@@ -245,6 +245,7 @@ class Genobuilder:
 
     def simulate_msprime_list(self, param_vals):
         """This function will go away once the code is complete"""
+        import msprime
 
         sims = []
         for p in param_vals:
@@ -718,7 +719,7 @@ if __name__ == "__main__":
         "-nh",
         "--number-haplotypes",
         help="Number of haplotypes/rows that will conform the genotype matrices",
-        default=99,
+        default=198,
         type=int,
     )
 
@@ -799,43 +800,42 @@ if __name__ == "__main__":
 
     # General parameters for all models
     params_dict["r"] = Parameter(
-        "r", 1.25e-8, 1e-9, (1e-10, 1e-7), inferable=False, plotlog=True
+        "r", 1.25e-8, (1e-10, 1e-7), inferable=False, plotlog=True
     )
     params_dict["mu"] = Parameter(
-        "mu", 1.25e-8, 1e-9, (1e-11, 1e-7), inferable=False, plotlog=True
+        "mu", 1.25e-8, (1e-10, 1e-7), inferable=False, plotlog=True
     )
-    # params_dict["Ne"] = Parameter("Ne", 10000, 14000, (5000, 15000), inferable=False)
-    params_dict["seqerr"] = Parameter(
-        "seqerr", None, 0.001, (0.00001, 0.01), inferable=False
-    )
+    params_dict["seqerr"] = Parameter("seqerr", None, (0.00001, 0.01), inferable=False)
 
-    """
-    # Parameters for exponential model: FIX  INIT   BOUNDS      INFERABLE
-    params_dict["T1"] = Parameter("T1", 500, 1000, (100, 1500), inferable=False)
-    params_dict["N1"] = Parameter("N1", 10000, 20000, (1000, 30000), inferable=False)
-    params_dict["T2"] = Parameter("T2", 3000, 4000, (1500, 5000), inferable=False)
-    params_dict["N2"] = Parameter("N2", 5000, 20000, (1000, 30000), inferable=False)
-    params_dict["growth"] = Parameter("growth", 0.01, 0.02, (0, 0.05), inferable=True)
-    """
-    # Parameters for zigzag model:      FIX  INIT   BOUNDS      INFERABLE
-    params_dict["T1"] = Parameter("T1", 33, 50, (1, 80), inferable=False)
-    params_dict["N1"] = Parameter("N1", 6000, 10000, (1431, 14312), inferable=True)
-    params_dict["T2"] = Parameter("T2", 133, 200, (81, 400), inferable=False)
-    params_dict["N2"] = Parameter("N2", 7000, 10000, (1431, 14312), inferable=True)
-    params_dict["T3"] = Parameter("T3", 533, 1000, (401, 1500), inferable=False)
-    params_dict["N3"] = Parameter("N3", 3000, 10000, (1431, 14312), inferable=True)
-    params_dict["T4"] = Parameter("T4", 2133, 4000, (1501, 5000), inferable=False)
-    params_dict["N4"] = Parameter("N4", 4000, 10000, (1431, 14312), inferable=True)
-    params_dict["T5"] = Parameter("T5", 8533, 7500, (5001, 10000), inferable=False)
-    params_dict["N5"] = Parameter("N5", 2000, 10000, (1431, 14312), inferable=True)
+    if args.demographic_model == "constant":
+        params_dict["Ne"] = Parameter("Ne", 10000, (5000, 15000), inferable=False)
 
-    # Parameters for ghost_migration model:
-    """
-    params_dict["T1"] = Parameter("T1", 1000, 4000, (500, 5000), inferable=False)
-    params_dict["N1"] = Parameter("N1", 5000, 18000, (1000, 20000), inferable=False)
-    params_dict["N2"] = Parameter("N2", 8000, 15000, (1000, 20000), inferable=False)
-    params_dict["mig"] = Parameter("mig", 0.9, 0.2, (0, 0.3), inferable=True)
-    """
+    elif args.demographic_model == "exponential":
+        # Parameters for exponential model: FIX   BOUNDS      INFERABLE
+        params_dict["T1"] = Parameter("T1", 500, (100, 1500), inferable=True)
+        params_dict["N1"] = Parameter("N1", 10000, (1000, 30000), inferable=False)
+        params_dict["T2"] = Parameter("T2", 3000, (1500, 5000), inferable=True)
+        params_dict["N2"] = Parameter("N2", 5000, (1000, 30000), inferable=False)
+        params_dict["growth"] = Parameter("growth", 0.01, (0, 0.05), inferable=False)
+
+    elif args.demographic_model == "zigzag":
+        # Parameters for zigzag model:      FIX  BOUNDS      INFERABLE
+        params_dict["T1"] = Parameter("T1", 33, (1, 80), inferable=False)
+        params_dict["N1"] = Parameter("N1", 6643, (1000, 30000), inferable=True)
+        params_dict["T2"] = Parameter("T2", 133, (81, 400), inferable=False)
+        params_dict["N2"] = Parameter("N2", 14312, (1000, 30000), inferable=True)
+        params_dict["T3"] = Parameter("T3", 533, (401, 1500), inferable=False)
+        params_dict["N3"] = Parameter("N3", 6643, (1000, 30000), inferable=True)
+        params_dict["T4"] = Parameter("T4", 2133, (1501, 5000), inferable=False)
+        params_dict["N4"] = Parameter("N4", 14312, (1000, 30000), inferable=True)
+        params_dict["T5"] = Parameter("T5", 8533, (5001, 10000), inferable=False)
+        params_dict["N5"] = Parameter("N5", 6643, (1000, 30000), inferable=True)
+
+    elif args.demographic_model == "ghost_migration":
+        params_dict["T1"] = Parameter("T1", 1000, (500, 5000), inferable=False)
+        params_dict["N1"] = Parameter("N1", 5000, (1000, 20000), inferable=False)
+        params_dict["N2"] = Parameter("N2", 8000, (1000, 20000), inferable=False)
+        params_dict["mig"] = Parameter("mig", 0.9, (0, 0.3), inferable=True)
 
     # Build the Genobuilder object
     genob = Genobuilder(

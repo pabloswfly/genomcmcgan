@@ -17,7 +17,7 @@ class Discriminator(nn.Module):
             out_channels=64,
             kernel_size=(1, 7),
             stride=(1, 2),
-            padding=(0, 2),
+            padding=(0, 3),
         )
         self.batch2 = nn.BatchNorm2d(64, eps=0.001, momentum=0.99)
 
@@ -28,7 +28,7 @@ class Discriminator(nn.Module):
             out_channels=128,
             kernel_size=(1, 7),
             stride=(1, 2),
-            padding=(0, 2),
+            padding=(0, 3),
         )
         self.batch3 = nn.BatchNorm2d(128, eps=0.001, momentum=0.99)
         self.dropout1 = nn.Dropout2d(0.5)
@@ -156,6 +156,7 @@ class Discriminator(nn.Module):
                 # Save the model weights with the lowest validation error
                 if (val_loss / j) < best_val_loss:
                     best_val_loss = val_loss / j
+                    best_train_acc = acc_train / len(trainflow)
                     best_epoch = epoch + 1
                     best_model = copy.deepcopy(self.state_dict())
 
@@ -164,6 +165,7 @@ class Discriminator(nn.Module):
         # Load the model with the lowest validation error
         self.load_state_dict(best_model)
         print(f"Best model has validation loss {best_val_loss:.3f} from {best_epoch}")
+        return best_train_acc
 
     def predict(self, inputs):
         """Compute model prediction over inputs"""
