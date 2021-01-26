@@ -18,7 +18,8 @@ class Symmetric(nn.Module):
         elif self.function == "mean":
             out = torch.mean(x, dim=self.axis, keepdim=True)
         elif self.function == "min":
-            out = torch.min(x, dim=self.axis, keepdim=True)
+            # torch.min and torch.max returns: (values, indices)
+            out = torch.min(x, dim=self.axis, keepdim=True)[0]
         elif self.function == "max":
-            out = torch.max(x, dim=self.axis, keepdim=True)
+            out = torch.max(x, dim=self.axis, keepdim=True)[0]
         return out
