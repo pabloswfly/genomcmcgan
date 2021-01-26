@@ -3,7 +3,7 @@ import numpy as np
 
 class Parameter:
     def __init__(
-        self, name, val, init, bounds, inferable, log=False, plotlog=False, **kwargs
+        self, name, val, bounds, inferable, log=False, plotlog=False, **kwargs
     ):
 
         self.name = name
@@ -11,7 +11,7 @@ class Parameter:
         self._proposals = []
         self.bounds = bounds
         self.log = log
-        self.init = init
+        self.init = np.random.uniform(bounds[0], bounds[1])
         self.step_size = 0.1
         self.inferable = inferable
         self.plotlog = plotlog
@@ -43,7 +43,9 @@ class Parameter:
 
         min, max = self.bounds
         if self.log:
-            x = np.random.uniform(np.log10(min), np.log10(max))
+            # RandomState() avoids getting the same random number from different
+            # CPUs when running the code in several processes in parallel
+            x = np.random.RandomState().uniform(np.log10(min), np.log10(max))
             return np.float_power(10, x)
         else:
-            return np.random.uniform(min, max)
+            return np.random.RandomState().uniform(min, max)
