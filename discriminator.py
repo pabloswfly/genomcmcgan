@@ -11,29 +11,31 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         # 1 because it is only 1 channel in a tensor (N, C, H, W)
-        self.batch1 = nn.BatchNorm2d(1, eps=0.001, momentum=0.99)
+        self.batch1 = nn.BatchNorm2d(1)
         self.conv1 = nn.Conv2d(
             in_channels=1,
             out_channels=64,
-            kernel_size=(1, 7),
+            kernel_size=(1, 5),
             stride=(1, 2),
-            padding=(0, 3),
+            padding=(0, 2),
+            bias=False,
         )
-        self.batch2 = nn.BatchNorm2d(64, eps=0.001, momentum=0.99)
+        self.batch2 = nn.BatchNorm2d(64)
 
-        self.symm1 = Symmetric("mean", 2)
+        self.symm1 = Symmetric("sum", 2)
 
         self.conv2 = nn.Conv2d(
             in_channels=64,
             out_channels=128,
-            kernel_size=(1, 7),
+            kernel_size=(1, 5),
             stride=(1, 2),
-            padding=(0, 3),
+            padding=(0, 2),
+            bias=False,
         )
-        self.batch3 = nn.BatchNorm2d(128, eps=0.001, momentum=0.99)
-        self.dropout1 = nn.Dropout2d(0.5)
+        # self.dropout1 = nn.Dropout2d(0.25)
+        self.batch3 = nn.BatchNorm2d(128)
 
-        self.symm2 = Symmetric("mean", 3)
+        self.symm2 = Symmetric("sum", 3)
 
         self.fc1 = nn.Linear(128, 64)
         self.fc2 = nn.Linear(64, 32)
@@ -52,9 +54,9 @@ class Discriminator(nn.Module):
 
         x = self.conv2(x)
         x = F.relu(x)
+        # x = self.dropout1(x)
 
         x = self.batch3(x)
-        x = self.dropout1(x)
 
         x = self.symm2(x)
 
@@ -73,12 +75,15 @@ class Discriminator(nn.Module):
         """Reset parameters and initialize with random weight values"""
 
         if isinstance(m, nn.Conv2d):
-            m.reset_parameters()
-            torch.nn.init.xavier_uniform_(m.weight)
+            # DCGAN paper says all model should be initialized like this
+            torch.nn.init.normal_(m.weight, 0.0, 0.02)
             if m.bias is not None:
                 torch.nn.init.zeros_(m.bias)
-        if isinstance(m, nn.Linear) or isinstance(m, nn.BatchNorm2d):
-            m.reset_parameters()
+        if isinstance(m, nn.Linear):
+            torch.nn.init.normal_(m.weight, 0.0, 0.02)
+        if isinstance(m, nn.BatchNorm2d):
+            nn.init.normal_(m.weight.data, 1.0, 0.02)
+            nn.init.constant_(m.bias.data, 0)
 
     def get_accuracy(self, y_true, y_prob):
         """Compute model accuracy over labelled data"""
@@ -88,7 +93,7 @@ class Discriminator(nn.Module):
         y_prob = y_prob > 0.5
         return (y_true == y_prob).sum().item() / y_true.size(0)
 
-    def fit(self, trainflow, valflow, epochs, lr):
+    def fit(self, trainflow, valflow, epochs, lr, model_selection=False):
         """Train the discriminator model with the Binary Cross-Entropy loss.
         trainflow: PyTorch data loader for the training dataset
         valflow: PyTorch data loader for the validation dataset
@@ -99,9 +104,6 @@ class Discriminator(nn.Module):
         optimizer = torch.optim.Adam(self.parameters(), lr)
         lossf = nn.BCELoss()
         best_val_loss = 1.0
-
-        print("Initializing weights of the model, deleting previous ones")
-        self.apply(self.weights_init)
         self.train()
 
         # Loop over the dataset multiple times
@@ -138,6 +140,7 @@ class Discriminator(nn.Module):
 
             print("")
             # Calculate stats on validation data with no gradient descent
+            train_acc = acc_train / len(trainflow)
             with torch.no_grad():
                 # For each batch of validation data
                 for j, (genmats, labels) in enumerate(valflow, 1):
@@ -163,9 +166,13 @@ class Discriminator(nn.Module):
             print("")
 
         # Load the model with the lowest validation error
-        self.load_state_dict(best_model)
-        print(f"Best model has validation loss {best_val_loss:.3f} from {best_epoch}")
-        return best_train_acc
+        if model_selection:
+            self.load_state_dict(best_model)
+            print(
+                f"Best model has validation loss {best_val_loss:.3f} from {best_epoch}"
+            )
+            train_acc = best_train_acc
+        return train_acc
 
     def predict(self, inputs):
         """Compute model prediction over inputs"""

@@ -112,7 +112,7 @@ def zigzag(args):
         ]
 
     generation_time = 30
-    N0 = 14312
+    N0 = 71560
     n_ancient = N0 / 10
     t_ancient = 34133.318528
 
@@ -124,7 +124,7 @@ def zigzag(args):
         msprime.PopulationParametersChange(time=T4, initial_size=N4, population_id=0),
         msprime.PopulationParametersChange(time=T5, initial_size=N5, population_id=0),
         msprime.PopulationParametersChange(
-            time=t_ancient, initial_size=n_ancient, growth_rate=0, population_id=0
+            time=t_ancient, initial_size=n_ancient, population_id=0
         ),
     ]
 

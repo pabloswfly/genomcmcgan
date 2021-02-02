@@ -57,6 +57,7 @@ class MCMCGAN:
         num_burnin_steps,
         thinning,
         num_reps_Dx,
+        target_acc_rate,
     ):
 
         tf.config.run_functions_eagerly(True)
@@ -65,6 +66,7 @@ class MCMCGAN:
         self.num_burnin_steps = num_burnin_steps
         self.thinning = thinning
         self.genob.num_reps = num_reps_Dx
+        self.target_acc_rate = target_acc_rate
         self.samples = None
         self.stats = None
         tfb = tfp.bijectors
@@ -88,7 +90,7 @@ class MCMCGAN:
             sampler = tfp.mcmc.TransformedTransitionKernel(
                 tfp.mcmc.HamiltonianMonteCarlo(
                     target_log_prob_fn=self.target_log_prob,
-                    num_leapfrog_steps=6,
+                    num_leapfrog_steps=8,
                     step_size=self.step_sizes,
                 ),
                 bijector=self.bijs,
@@ -98,7 +100,7 @@ class MCMCGAN:
             self.mcmc_kernel = tfp.mcmc.SimpleStepSizeAdaptation(
                 inner_kernel=sampler,
                 num_adaptation_steps=int(self.num_burnin_steps * 0.8),
-                target_accept_prob=0.75,
+                target_accept_prob=self.target_acc_rate,
             )
 
         # Create and set up the NUTS sampler
@@ -117,7 +119,7 @@ class MCMCGAN:
             self.mcmc_kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
                 inner_kernel=sampler,
                 num_adaptation_steps=int(self.num_burnin_steps * 0.8),
-                target_accept_prob=0.75,
+                target_accept_prob=self.target_acc_rate,
                 # NUTS inside of a TTK requires custom getter/setter functions.
                 step_size_setter_fn=lambda pkr, new_step_size: pkr._replace(
                     inner_results=pkr.inner_results._replace(step_size=new_step_size)
@@ -166,7 +168,7 @@ class MCMCGAN:
         # Add a progress bar for the chain sampling iterations
         t = self.thinning
         pbar = tfp.experimental.mcmc.ProgressBarReducer(
-            self.num_mcmc_results * (t + 1) + self.num_burnin_steps - t
+            self.num_mcmc_results * (t + 1) + self.num_burnin_steps
         )
         self.mcmc_kernel = tfp.experimental.mcmc.WithReductions(self.mcmc_kernel, pbar)
 
@@ -257,7 +259,7 @@ class MCMCGAN:
                 plt.hlines(
                     p.val,
                     0,
-                    len(self.samples),
+                    len(self.samples[0]),
                     zorder=4,
                     color=colors[i],
                     label="${}$".format(i),

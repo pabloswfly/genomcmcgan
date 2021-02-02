@@ -8,7 +8,7 @@ import numpy as np
 from mcmcgan import MCMCGAN
 from discriminator import Discriminator
 from genobuilder import Genobuilder
-from training_utils import mcmc_diagnostic_plots
+from training_utils import mcmc_diagnostic_plots, plot_disc_acc, plot_pair_evolution
 
 
 def run_genomcmcgan(
@@ -51,13 +51,17 @@ def run_genomcmcgan(
         mcmcgan.discriminator = nn.DataParallel(mcmcgan.discriminator)
     mcmcgan.discriminator.to(device)
 
+    print("Initializing weights of the model")
+    mcmcgan.discriminator.apply(mcmcgan.discriminator.module.weights_init)
+
     print(f"Demographic model for inference - {mcmcgan.genob.demo_model}")
     for p in mcmcgan.genob.params.values():
         print(f"{p.name} inferable: {p.inferable}")
 
-    max_num_iters = 10
+    max_num_iters = 20
     start_t = time.time()
     means = [0.0]
+    accs = []
 
     while max_num_iters != mcmcgan.iter:
 
@@ -76,15 +80,26 @@ def run_genomcmcgan(
         valflow = torch.utils.data.DataLoader(valset, 32, True)
 
         # After wrapping the cnn model with DataParallel, -.module.- is necessary
-        best_acc = mcmcgan.discriminator.module.fit(trainflow, valflow, epochs, lr=0.0001)
+        accs.append(
+            mcmcgan.discriminator.module.fit(trainflow, valflow, epochs, lr=0.0001)
+        )
+
+        if len(accs) > 1:
+            plot_disc_acc(accs, mcmcgan.iter)
 
         # Check for convergence
-        if best_acc < 0.55:
+        if accs[-1] < 0.55:
             print("convergence")
             break
 
         # Run the MCMC sampling step
-        mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, thinning=1, num_reps_Dx=10)
+        mcmcgan.setup_mcmc(
+            num_mcmc_results=num_mcmc_samples,
+            num_burnin_steps=num_mcmc_burnin,
+            thinning=0,
+            num_reps_Dx=10,
+            target_acc_rate=0.8,
+        )
         mcmcgan.run_chain()
 
         # Obtain posterior samples and stats for plotting and diagnostics
@@ -103,6 +118,7 @@ def run_genomcmcgan(
         for i, p in enumerate(mcmcgan.genob.inferable_params):
             # Update the MCMC stats for each parameter
             print(f"{p.name} samples with mean {means[i]} and std {stds[i]}")
+            p.step_size = sample_stats["step_size"][i][-1].numpy()
             p.proposals = mcmcgan.samples[i]
             p.init = mcmcgan.samples[i][-1]
 
@@ -116,6 +132,7 @@ def run_genomcmcgan(
 
     print(f"The estimates obtained after {mcmcgan.iter} iterations are:")
     print(means)
+    plot_pair_evolution(mcmcgan.genob.inferable_params, mcmcgan.kernel_name)
 
 
 if __name__ == "__main__":
