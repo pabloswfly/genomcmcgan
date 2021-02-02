@@ -808,28 +808,28 @@ if __name__ == "__main__":
     params_dict["seqerr"] = Parameter("seqerr", None, (0.00001, 0.01), inferable=False)
 
     if args.demographic_model == "constant":
-        params_dict["Ne"] = Parameter("Ne", 10000, (5000, 15000), inferable=False)
+        params_dict["Ne"] = Parameter("Ne", 10000, (5000, 30000), inferable=True)
 
     elif args.demographic_model == "exponential":
         # Parameters for exponential model: FIX   BOUNDS      INFERABLE
         params_dict["T1"] = Parameter("T1", 500, (100, 1500), inferable=True)
-        params_dict["N1"] = Parameter("N1", 10000, (1000, 30000), inferable=False)
+        params_dict["N1"] = Parameter("N1", 10000, (1000, 30000), inferable=True)
         params_dict["T2"] = Parameter("T2", 3000, (1500, 5000), inferable=True)
-        params_dict["N2"] = Parameter("N2", 5000, (1000, 30000), inferable=False)
-        params_dict["growth"] = Parameter("growth", 0.01, (0, 0.05), inferable=False)
+        params_dict["N2"] = Parameter("N2", 5000, (1000, 30000), inferable=True)
+        params_dict["growth"] = Parameter("growth", 0.01, (0, 0.05), inferable=True)
 
     elif args.demographic_model == "zigzag":
         # Parameters for zigzag model:      FIX  BOUNDS      INFERABLE
         params_dict["T1"] = Parameter("T1", 33, (1, 80), inferable=False)
-        params_dict["N1"] = Parameter("N1", 6643, (1000, 30000), inferable=True)
+        params_dict["N1"] = Parameter("N1", 71560, (1000, 100000), inferable=True)
         params_dict["T2"] = Parameter("T2", 133, (81, 400), inferable=False)
-        params_dict["N2"] = Parameter("N2", 14312, (1000, 30000), inferable=True)
+        params_dict["N2"] = Parameter("N2", 7156, (1000, 100000), inferable=True)
         params_dict["T3"] = Parameter("T3", 533, (401, 1500), inferable=False)
-        params_dict["N3"] = Parameter("N3", 6643, (1000, 30000), inferable=True)
+        params_dict["N3"] = Parameter("N3", 71560, (1000, 100000), inferable=True)
         params_dict["T4"] = Parameter("T4", 2133, (1501, 5000), inferable=False)
-        params_dict["N4"] = Parameter("N4", 14312, (1000, 30000), inferable=True)
+        params_dict["N4"] = Parameter("N4", 7156, (1000, 100000), inferable=True)
         params_dict["T5"] = Parameter("T5", 8533, (5001, 10000), inferable=False)
-        params_dict["N5"] = Parameter("N5", 6643, (1000, 30000), inferable=True)
+        params_dict["N5"] = Parameter("N5", 71560, (1000, 100000), inferable=True)
 
     elif args.demographic_model == "ghost_migration":
         params_dict["T1"] = Parameter("T1", 1000, (500, 5000), inferable=False)
