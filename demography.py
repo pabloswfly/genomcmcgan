@@ -138,6 +138,46 @@ def zigzag(args):
     )
 
 
+def bottleneck(args):
+
+    genob, params, randomize, i, proposals = args
+    necessary_params = ["mu", "r", "N0", "T1", "N1", "T2", "N2"]
+
+    for p in necessary_params:
+        if p not in list(params.keys()):
+            print(
+                "Invalid combination of parameters. Needed: "
+                "mu | r | N0 | T1 | N1 | T2 | N2"
+            )
+
+    if proposals:
+        mu, r, N0, T1, N1, T2, N2 = [
+            params[p].prop(i) if params[p].inferable else params[p].val
+            for p in necessary_params
+        ]
+    else:
+        mu, r, N0, T1, N1, T2, N2 = [
+            params[p].rand() if randomize else params[p].val for p in necessary_params
+        ]
+
+    # Infer the 3 pop sizes, where N0 = N2
+    demographic_events = [
+        msprime.PopulationParametersChange(time=0, initial_size=N0),
+        msprime.PopulationParametersChange(time=T1, initial_size=N1),
+        msprime.PopulationParametersChange(time=T2, initial_size=N2),
+    ]
+
+    return msprime.simulate(
+        sample_size=genob.num_samples,
+        demographic_events=demographic_events,
+        length=genob.seq_len,
+        mutation_rate=mu,
+        recombination_rate=r,
+        # random_seed=genob.seed,
+    )
+
+
+
 def ghost_migration(args):
     """Mass migration at time T1 from population 1 with pop size N2 to population
     0 with pop size N1. Samples are collected only from population 0."""
