@@ -91,6 +91,7 @@ def plot_pair_evolution(params, mcmc_kernel):
             files.append(file)
     files = sorted(files, key=lambda x: int(x[9:-4]))
     arvzs, cs = [], []
+
     for i, f in enumerate(files):
         with open(f"./results/{f}", "rb") as obj:
             i += 1

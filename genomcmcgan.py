@@ -46,9 +46,8 @@ def run_genomcmcgan(
 
     # Use GPUs for Discriminator operations if possible
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    if torch.cuda.device_count() > 1:
-        print("Using", torch.cuda.device_count(), "GPUs")
-        mcmcgan.discriminator = nn.DataParallel(mcmcgan.discriminator)
+    print("Using", torch.cuda.device_count(), "GPUs")
+    mcmcgan.discriminator = nn.DataParallel(mcmcgan.discriminator)
     mcmcgan.discriminator.to(device)
 
     print("Initializing weights of the model")
