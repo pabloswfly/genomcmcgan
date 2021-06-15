@@ -97,11 +97,13 @@ The different arguments and flags are:
 
 The code was tested using the following packages and versions:
 
-Tensorflow==2.4
+Tensorflow==2.4.0
 
-Tensorflow probability==0.11.0
+Tensorflow probability==0.12.1
 
-Tensorflow addons==0.8.3
+Tensorflow addons==0.11.1
+
+PyTorch==1.4.0
 
 Zarr==2.4.0
 
