@@ -82,8 +82,17 @@ class MCMCGAN:
             self.inits.append(tf.cast(p.init, tf.float32))
             self.step_sizes.append(tf.cast(p.step_size, tf.float32))
 
-        if self.kernel_name not in ["hmc", "nuts"]:
-            raise NameError("kernel value must be either hmc or nuts")
+        if self.kernel_name not in ["hmc", "nuts", "randomwalk"]:
+            raise NameError("kernel value must be either randomwalk, hmc or nuts")
+
+        # Create and set up the HMC sampler
+        elif self.kernel_name == "randomwalk":
+            self.mcmc_kernel = tfp.mcmc.TransformedTransitionKernel(
+                tfp.mcmc.RandomWalkMetropolis(
+                    target_log_prob_fn=self.target_log_prob
+                ),
+                bijector=self.bijs,
+            )
 
         # Create and set up the HMC sampler
         elif self.kernel_name == "hmc":
@@ -150,6 +159,15 @@ class MCMCGAN:
             results.accepted_results.step_size,
         )
 
+    def trace_fn_randomwalk(self, _, pkr):
+        """Trace function to collect stats during Random walk sampling"""
+        results = pkr.inner_results.inner_results
+        return (
+            results.accepted_results.target_log_prob,
+            ~(results.log_accept_ratio > -1000.0),
+            results.is_accepted,
+        )
+
     # autograph=False is recommended by the TFP team. It is related to how
     # control-flow statements are handled.
     # experimental_compile=True for higher efficiency in XLA_GPUs, TPUs, etc...
@@ -158,9 +176,12 @@ class MCMCGAN:
         """Run the MCMC chain with the specified kernel"""
 
         # Stats to collect during the chain simulation
-        trace_fn = (
-            self.trace_fn_nuts if self.kernel_name == "nuts" else self.trace_fn_hmc
-        )
+        if self.kernel_name == "nuts":
+            trace_fn = self.trace_fn_nuts
+        elif self.kernel_name == "hmc":
+            trace_fn = self.trace_fn_hmc
+        elif self.kernel_name == "randomwalk":
+            trace_fn = self.trace_fn_randomwalk
 
         tf_seed = tf.constant(self.seed) if self.seed else None
         print(f"Selected mcmc kernel is {self.kernel_name}")
@@ -196,6 +217,13 @@ class MCMCGAN:
     def result_to_stats(self):
         """Convert results from running the MCMC chain into a posterior list
         and sample_stats list that can be given to Arviz for visualizations"""
+
+        # Stats for Random Walk kernel
+        if self.kernel_name == "randomwalk":
+            stats_names = ["logprob", "diverging", "acceptance"]
+            sample_stats = {k: v for k, v in zip(stats_names, self.stats)}
+            sample_stats["step_size"] = [tf.constant(np.zeros(self.num_mcmc_results))
+                                                for _ in self.genob.inferable_params]
 
         # Stats for HMC kernel
         if self.kernel_name == "hmc":

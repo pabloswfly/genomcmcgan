@@ -821,6 +821,9 @@ if __name__ == "__main__":
         params_dict["N2"] = Parameter("N2", 5000, (1000, 30000), inferable=False)
         params_dict["growth"] = Parameter("growth", 0.01, (0, 0.05), inferable=True)
 
+        # Print the built model to the user
+        dm.exponential_model([params_dict, False, 0, False], print=True)
+
     elif args.demographic_model == "zigzag":
         # Parameters for zigzag model:      FIX  BOUNDS      INFERABLE
         params_dict["T1"] = Parameter("T1", 33, (1, 80), inferable=False)
@@ -834,6 +837,9 @@ if __name__ == "__main__":
         params_dict["T5"] = Parameter("T5", 8533, (5001, 10000), inferable=False)
         params_dict["N5"] = Parameter("N5", 71560, (1000, 100000), inferable=True)
 
+        # Print the built model to the user
+        dm.zigzag_model([params_dict, False, 0, False], print=True)
+
     elif args.demographic_model == "bottleneck":
         # Parameters for exponential model: FIX   BOUNDS      INFERABLE
         params_dict["N0"] = Parameter("N0", 10000, (100, 30000), inferable=True)
@@ -842,15 +848,8 @@ if __name__ == "__main__":
         params_dict["T2"] = Parameter("T2", 2000, (1500, 5000), inferable=False)
         params_dict["N2"] = Parameter("N2", 10000, (100, 30000), inferable=True)
 
-        import msprime
-        demographic_events = [
-            msprime.PopulationParametersChange(time=0, initial_size=params_dict["N0"].val),
-            msprime.PopulationParametersChange(time=params_dict["T1"].val, initial_size=params_dict["N1"].val),
-            msprime.PopulationParametersChange(time=params_dict["T2"].val, initial_size=params_dict["N2"].val),
-        ]
-
-        debugger = msprime.DemographyDebugger(Ne=10000, demographic_events=demographic_events)
-        debugger.print_history()
+        # Print the built model to the user
+        dm.bottleneck_model([params_dict, False, 0, False], print=True)
 
     elif args.demographic_model == "ghost_migration":
         # Parameters for exponential model: FIX   BOUNDS      INFERABLE
