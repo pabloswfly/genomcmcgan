@@ -96,8 +96,8 @@ def run_genomcmcgan(
             num_mcmc_results=num_mcmc_samples,
             num_burnin_steps=num_mcmc_burnin,
             thinning=0,
-            num_reps_Dx=10,
-            target_acc_rate=0.8,
+            num_reps_Dx=50,
+            target_acc_rate=0.5,
         )
         mcmcgan.run_chain()
 
@@ -153,7 +153,7 @@ if __name__ == "__main__":
         "--kernel-name",
         help="Type of MCMC kernel to run. See choices for options. Default set to hmc",
         type=str,
-        choices=["hmc", "nuts", "random walk"],
+        choices=["hmc", "nuts", "randomwalk"],
         default="hmc",
     )
 
